@@ -1,0 +1,6 @@
+---
+type: intent
+name: nabvoicemaild/forecast
+utterances:
+  - message
+  - lis-moi le message
