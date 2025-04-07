@@ -4,19 +4,32 @@ import sys
 
 from nabcommon.nabservice import NabService
 from . import rfid_data
+from .models import NabradioConfig
 
 class NabRadio(NabService):
     def __init__(self):
         super().__init__()
 
     async def reload_config(self):
-        # Ajoutez ici le rechargement de la configuration si nécessaire
-        pass
+        # Ici, vous pourriez recharger la configuration depuis la BDD
+        config = NabradioConfig.objects.first()
+        if config is None:
+            config = NabradioConfig.objects.create()
+        # Par exemple, vous pouvez assigner la liste des URL à un attribut
+        self.radio_urls = config.radio_urls
+
+    async def save_radio_urls(self, urls):
+        """
+        Sauvegarde la liste des URL dans la configuration.
+        :param urls: liste de chaînes de caractères (les URL)
+        """
+        config, created = NabradioConfig.objects.get_or_create(id=1)
+        config.radio_urls = urls
+        config.save()
+        self.radio_urls = urls  # mettre à jour l'attribut local si nécessaire
+        logging.info("Radio URLs saved: " + ", ".join(urls))
 
     async def _launch_radio(self, streaming_url):
-        """
-        Lance la lecture de la radio en envoyant un paquet contenant l'URL du streaming.
-        """
         logging.info("Streaming radio " + streaming_url)
         now = datetime.datetime.now(datetime.timezone.utc)
         expiration = now + datetime.timedelta(minutes=1)
@@ -30,9 +43,6 @@ class NabRadio(NabService):
         await self.writer.drain()
 
     async def _stop_radio(self):
-        """
-        Arrête la lecture de la radio en envoyant une commande d'arrêt.
-        """
         logging.info("Stopping radio")
         now = datetime.datetime.now(datetime.timezone.utc)
         expiration = now + datetime.timedelta(minutes=1)
@@ -45,10 +55,6 @@ class NabRadio(NabService):
         await self.writer.drain()
 
     async def process_nabd_packet(self, packet):
-        """
-        Traite un paquet entrant.  
-        Pour un événement RFID, on lit l'URL du streaming et on lance la radio.
-        """
         if (
             packet.get("type") == "rfid_event"
             and packet.get("app") == "nabradio"
@@ -59,8 +65,6 @@ class NabRadio(NabService):
                 await self._launch_radio(streaming_url)
             except Exception as e:
                 logging.error(f"Error launching radio: {e}")
-
-        # Ici, vous pouvez éventuellement ajouter d'autres conditions pour d'autres types de paquets.
 
 if __name__ == "__main__":
     NabRadio.main(sys.argv[1:])
