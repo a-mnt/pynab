@@ -1,7 +1,10 @@
+import json
+
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.generic import TemplateView
 
+from .models import Config  # Assurez-vous que le modèle Config est bien défini dans models.py
 from . import rfid_data
 
 class SettingsView(TemplateView):
