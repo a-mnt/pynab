@@ -19,20 +19,21 @@ class SettingsView(TemplateView):
         return render(request, SettingsView.template_name, context=context)
 
     def post(self, request, *args, **kwargs):
+        # Récupère le singleton de configuration
+        config = Config.load()
 
-        data = "DATA_IN_LOCAL_DB"
-        uid = ""
-
+        # Met à jour les paramètres à partir des données du formulaire
         if "radio_uid" in request.POST:
-            uid = request.POST["radio_uid"]
+            config.radio_uid = request.POST["radio_uid"]
         if "streaming_url" in request.POST:
-            streaming_url = request.POST["streaming_url"]
+            config.streaming_url = request.POST["streaming_url"]
         else:
-            streaming_url = uid
-
-        rfid_data.write_data_ui_for_views(uid, streaming_url)
-
-        return JsonResponse({"data": data})
+            config.streaming_url = request.POST.get("radio_uid", "")
+        
+        # Sauvegarde la configuration dans la base de données
+        config.save()
+        # Optionnel : Notifier le service (par ex. via un signal) que la configuration a changé
+        return JsonResponse({"data": "Configuration saved"})
 
 class RFIDDataView(TemplateView):
     template_name = "nabradio/rfid-data.html"
