@@ -7,4 +7,4 @@ class Config(singleton_model.SingletonModel):
     json_data_base = models.TextField(null=True, default="")
     
     # Nouveau champ pour sauvegarder plusieurs URL
-    radio_urls = models.JSONField(null=True, blank=True, default=list)
+    #radio_urls = models.JSONField(null=True, blank=True, default=list)
