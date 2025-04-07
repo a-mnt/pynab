@@ -37,9 +37,10 @@
       </div>
     </div>
     <div class="card-footer">
-      <div class="row">
-        <div class="col-12 text-right">
-          <button type="submit" class="btn btn-primary">{% trans "Save Changes" %}</button>
+      <div class="row mb-2">
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary disabled ml-2 float-right save-button">{% trans "Save" %}</button>
+          <button type="reset" class="btn btn-outline-primary disabled ml-2 float-right reset-button">{% trans "Reset" %}</button>
         </div>
       </div>
     </div>
@@ -162,5 +163,35 @@
         });
       });
     });
+    form.on('submit', function() {
+    var formdata = form.serialize();
+    $.ajax({
+        url: url,
+        method: "POST",
+        data: formdata,
+        success: function (data) {
+            $("#nabradio-settings").replaceWith(data);
+        },
+        error: function (jqXHR, statusText, errorThrown) {
+            // On cible l'input de l'URL de streaming pour la validation
+            form.find("#streamingUrlInput").removeClass('is-invalid');
+            form.find(".invalid-feedback").remove();
+            if (jqXHR.status == 406 && jqXHR.responseJSON.status == 'unknownRadioError') {
+                form.find("#streamingUrlInput").addClass('is-invalid');
+                $('<div class="invalid-feedback">' + jqXHR.responseJSON.message + '</div>')
+                  .insertAfter(form.find("#streamingUrlInput"));
+            } else {
+                $.bootstrapGrowl("{% trans 'Unknown server error' %}", {type: 'danger', allow_dismiss: true});
+            }
+        }
+    });
+    return false;
+});
+
+resetBtn.on("click", function() {
+    $.get(url, function(data) {
+        $("#nabradio-settings").replaceWith(data);
+    });
+});
   </script>
 </div>
