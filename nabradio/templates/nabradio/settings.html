@@ -43,11 +43,12 @@
         </div>
       </div>
       
-      <!-- Bouton d'action, par exemple pour tester la lecture -->
+      <!-- Boutons d'action pour lancer ou arrêter la radio -->
       <div class="form-group row">
         <label class="col-6 col-form-label">{% trans "Action" %}</label>
         <div class="col-6">
           <button type="button" class="btn btn-primary now-button" data-action="play">{% trans "Play" %}</button>
+          <button type="button" class="btn btn-secondary now-button" data-action="stop">{% trans "Stop" %}</button>
         </div>
       </div>
       
@@ -115,6 +116,7 @@
           $("#nabradio-settings").replaceWith(data);
         });
       });
+      // Gère le clic sur les boutons d'action (play/stop)
       form.find('button.now-button').on("click", function() {
         var btn = $(this);
         btn.addClass('disabled');
@@ -128,6 +130,11 @@
           method: "PUT",
           success: function (data) {
             btn.removeClass('disabled');
+            $.bootstrapGrowl("{% trans "Action performed" %}", {type: 'success', allow_dismiss: true});
+          },
+          error: function() {
+            btn.removeClass('disabled');
+            $.bootstrapGrowl("{% trans "Error performing action" %}", {type: 'danger', allow_dismiss: true});
           }
         });
         return false;
