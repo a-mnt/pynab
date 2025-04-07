@@ -16,7 +16,7 @@ class SettingsView(TemplateView):
         context["streaming_url"] = streaming_url
         context["radio_uid"] = uid
 
-        return render(request, RFIDDataView.template_name, context=context)
+        return render(request, SettingsView.template_name, context=context)
 
     def post(self, request, *args, **kwargs):
 
