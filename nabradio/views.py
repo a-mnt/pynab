@@ -4,11 +4,16 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.generic import TemplateView
 
-from .models import Config  # Assurez-vous que le modèle Config est bien défini dans models.py
+from .models import Config
 from . import rfid_data
 
 class SettingsView(TemplateView):
     template_name = "nabradio/settings.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["config"] = Config.load()
+        return context
 
     def get(self, request, *args, **kwargs):
         context = self.get_context_data(**kwargs)
@@ -35,8 +40,8 @@ class SettingsView(TemplateView):
         
         # Sauvegarde la configuration dans la base de données
         config.save()
-        # Optionnel : Notifier le service (par ex. via un signal) que la configuration a changé
-        return JsonResponse({"data": "Configuration saved"})
+        context = self.get_context_data(**kwargs)
+        return render(request, SettingsView.template_name, context=context)
 
 class RFIDDataView(TemplateView):
     template_name = "nabradio/rfid-data.html"
