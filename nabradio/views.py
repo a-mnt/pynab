@@ -72,3 +72,46 @@ class RFIDDataView(TemplateView):
         rfid_data.write_data_ui_for_views(uid, streaming_url)
 
         return JsonResponse({"data": data})
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.utils.decorators import method_decorator
+from .models import WebRadio
+from .nabradio import NabRadio  
+
+
+radio_controller = NabRadio()
+
+
+    @csrf_exempt
+    @require_http_methods(["POST"])
+    def delete_webradio(request):
+        radio_id = request.POST.get("radio_id")
+        if not radio_id:
+            return JsonResponse({"error": "Missing radio_id"}, status=400)
+        try:
+            WebRadio.objects.get(id=radio_id).delete()
+            return JsonResponse({"status": "deleted"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+
+    @csrf_exempt
+    @require_http_methods(["POST"])
+    def control_webradio(request):
+        action = request.POST.get("action")
+        radio_id = request.POST.get("radio_id")
+
+        if action not in ("play", "stop") or not radio_id:
+            return JsonResponse({"error": "Invalid parameters"}, status=400)
+
+        try:
+            if action == "play":
+                radio = WebRadio.objects.get(id=radio_id)
+                radio_controller.loop.create_task(radio_controller._launch_radio(radio.url))
+                return JsonResponse({"status": "playing"})
+            elif action == "stop":
+                radio_controller.loop.create_task(radio_controller.stop_radio())
+                return JsonResponse({"status": "stopped"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
