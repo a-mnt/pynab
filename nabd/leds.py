@@ -34,8 +34,8 @@ class LedsSoft(Leds, metaclass=abc.ABCMeta):
     Base implementation with software pulsing.
     """
 
-    PULSING_RATE = 0.100  # faster: every 100ms
-    PULSING_STEPS = 15    # smoother gradient
+    PULSING_RATE = 0.05  # faster: every 50ms
+    PULSING_STEPS = 30    # smoother gradient
 
     def __init__(self):
         self.condition = Condition()
