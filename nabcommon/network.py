@@ -40,7 +40,7 @@ def internet_connection():
         "8.8.4.4",  # Google DNS
     ]
     dns_port = 53
-    timeout = 3.0
+    timeout = 0.5
     for dns_server in DNS_SERVER_LIST:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

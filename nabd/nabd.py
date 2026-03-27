@@ -104,6 +104,12 @@ class Nabd:
         self.nabio = nabio
         self.idle_cv = asyncio.Condition()
         self.idle_queue: Deque[IdleQueueItem] = collections.deque()
+        # Cache état réseau
+        self._network_status_cache = {
+            "ts": 0.0,
+            "has_ip": None,
+            "has_internet": None,
+        }
         # Current position of ears in idle mode
         self.ears = {
             "left": Nabd.INIT_EAR_POSITION,
@@ -140,6 +146,34 @@ class Nabd:
         else:
             self.asr = None
             self.nlu = None
+
+    async def _get_network_status(self):
+        now = time.monotonic()
+        ttl = 30.0  # secondes
+
+        # 1) Retourne le cache si encore valide
+        if now - self._network_status_cache["ts"] < ttl:
+            return (
+                self._network_status_cache["has_ip"],
+                self._network_status_cache["has_internet"],
+            )
+
+        # 2) Vérifie d'abord si l'interface a une IP
+        has_ip = network.ip_address(self.nabio.network_interface()) is not None
+
+        # 3) Ne teste Internet que si une IP existe
+        has_internet = False
+        if has_ip:
+            has_internet = await asyncio.to_thread(network.internet_connection)
+
+        # 4) Met à jour le cache
+        self._network_status_cache = {
+            "ts": now,
+            "has_ip": has_ip,
+            "has_internet": has_internet,
+        }
+
+        return has_ip, has_internet
 
     async def reload_config(self):
         """
@@ -179,12 +213,15 @@ class Nabd:
         left, right = self.ears["left"], self.ears["right"]
         await self.nabio.move_ears_with_leds((255, 0, 255), left, right)
         self.nabio.pulse(Led.BOTTOM, (255, 0, 255))  # Fuchsia
-        if network.ip_address(self.nabio.network_interface()) is None:
-            # not even a local network connection: real bad
+        
+        has_ip, has_internet = await self._get_network_status()
+
+        if not has_ip:
+            # pas de réseau local
             logging.error("no network connection")
             self.nabio.pulse(Led.BOTTOM, (255, 0, 0))  # Red
-        elif not network.internet_connection():
-            # local network connection, but no Internet access: not so good
+        elif not has_internet:
+            # réseau local OK, mais pas d'accès Internet
             logging.warning("no Internet access")
             self.nabio.pulse(Led.BOTTOM, (255, 165, 0))  # Orange
 
