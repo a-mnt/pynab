@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 
+from asgiref.sync import async_to_sync
 from django.apps import apps
 from django.conf import settings
 from django.core.cache import cache
@@ -22,14 +23,30 @@ from nabcommon.nabservice import NabService
 from nabd.i18n import Config
 
 
+def _run_command(cmd, cwd=None):
+    proc = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def _run_command_stdout(cmd, cwd=None):
+    return _run_command(cmd, cwd=cwd)[1]
+
+
 class NabdConnection:
     async def __aenter__(self):
         conn = asyncio.open_connection(NabService.HOST, NabService.PORT_NUMBER)
         self.reader, self.writer = await asyncio.wait_for(conn, 0.5)
         return self
 
-    async def __aexit__(self, type, value, traceback):
+    async def __aexit__(self, exc_type, exc, tb):
         self.writer.close()
+        await self.writer.wait_closed()
 
     @staticmethod
     async def transaction(fun, *args):
@@ -44,6 +61,28 @@ class NabdConnection:
                 "message": "Communication with Nabd timed out.",
             }
 
+    @staticmethod
+    async def send_packet(writer, packet):
+        if isinstance(packet, dict):
+            payload = json.dumps(packet) + "\r\n"
+            writer.write(payload.encode("utf8"))
+        elif isinstance(packet, str):
+            writer.write((packet + "\r\n").encode("utf8"))
+        else:
+            writer.write(packet)
+        await writer.drain()
+
+    @staticmethod
+    async def wait_for_response(reader, request_id, timeout):
+        while True:
+            line = await asyncio.wait_for(reader.readline(), timeout)
+            packet = json.loads(line.decode("utf8"))
+            if (
+                packet.get("type") == "response"
+                and packet.get("request_id") == request_id
+            ):
+                return packet
+
 
 class BaseView(View, metaclass=abc.ABCMeta):
     @abc.abstractmethod
@@ -54,18 +93,13 @@ class BaseView(View, metaclass=abc.ABCMeta):
         return await NabdConnection.transaction(self._do_query_gestalt)
 
     async def _do_query_gestalt(self, reader, writer):
-        writer.write(b'{"type":"gestalt","request_id":"gestalt"}\r\n')
-        await writer.drain()
-        while True:
-            line = await asyncio.wait_for(reader.readline(), 0.5)
-            packet = json.loads(line.decode("utf8"))
-            if (
-                "type" in packet
-                and packet["type"] == "response"
-                and "request_id" in packet
-                and packet["request_id"] == "gestalt"
-            ):
-                return {"status": "ok", "result": packet}
+        await NabdConnection.send_packet(
+            writer, {"type": "gestalt", "request_id": "gestalt"}
+        )
+        packet = await NabdConnection.wait_for_response(
+            reader, "gestalt", 0.5
+        )
+        return {"status": "ok", "result": packet}
 
     def get_locales(self):
         config = Config.load()
@@ -88,21 +122,18 @@ class BaseView(View, metaclass=abc.ABCMeta):
         services = []
         for config in apps.get_app_configs():
             if hasattr(config.module, "NABAZTAG_SERVICE_PRIORITY"):
-                service_page = "services"
-                if hasattr(config.module, "NABAZTAG_SERVICE_PAGE"):
-                    service_page = config.module.NABAZTAG_SERVICE_PAGE
+                service_page = getattr(
+                    config.module, "NABAZTAG_SERVICE_PAGE", "services"
+                )
                 if service_page == page:
                     services.append(
                         {
-                            "priority": (
-                                config.module.NABAZTAG_SERVICE_PRIORITY
-                            ),
+                            "priority": config.module.NABAZTAG_SERVICE_PRIORITY,
                             "name": config.name,
                         }
                     )
         services_sorted = sorted(services, key=lambda s: s["priority"])
-        services_names = [s["name"] for s in services_sorted]
-        return services_names
+        return [s["name"] for s in services_sorted]
 
 
 class NabWebView(BaseView):
@@ -119,7 +150,7 @@ class NabWebView(BaseView):
             config = Config.load()
             config.locale = request.POST["locale"]
             config.save()
-            asyncio.run(self.notify_config_update("nabd", "locale"))
+            async_to_sync(self.notify_config_update)("nabd", "locale")
             user_language = to_language(config.locale)
             translation.activate(user_language)
             request.LANGUAGE_CODE = translation.get_language()
@@ -133,13 +164,14 @@ class NabWebView(BaseView):
 
     async def _do_notify_config_update(self, reader, writer, service, slot):
         try:
-            packet = (
-                f'{{"type":"config-update","service":"{service}",'
-                f'"slot":"{slot}"}}\r\n'
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "config-update",
+                    "service": service,
+                    "slot": slot,
+                },
             )
-            writer.write(packet.encode("utf-8"))
-            await writer.drain()
-            writer.close()
         except Exception:
             pass
 
@@ -165,14 +197,17 @@ class NabWebRfidView(BaseView):
             if hasattr(config.module, "NABAZTAG_SERVICE_PRIORITY"):
                 if hasattr(config.module, "NABAZTAG_RFID_APPLICATION_NAME"):
                     if config.module.NABAZTAG_RFID_APPLICATION_NAME:
-                        app_name = config.module.NABAZTAG_RFID_APPLICATION_NAME
-                        services.append({"app": config.name, "name": app_name})
-        services_sorted = sorted(services, key=lambda s: s["name"])
-        return services_sorted
+                        services.append(
+                            {
+                                "app": config.name,
+                                "name": config.module.NABAZTAG_RFID_APPLICATION_NAME,
+                            }
+                        )
+        return sorted(services, key=lambda s: s["name"])
 
     def get_context(self):
         context = super().get_context()
-        gestalt = asyncio.run(self.query_gestalt())
+        gestalt = async_to_sync(self.query_gestalt)()
         if gestalt["status"] == "ok":
             rfid = {
                 "status": "ok",
@@ -188,11 +223,7 @@ class NabWebRfidView(BaseView):
 async def check_is_idle_state(reader):
     line = await asyncio.wait_for(reader.readline(), 1.0)
     packet = json.loads(line.decode("utf8"))
-    if (
-        "type" not in packet
-        or packet["type"] != "state"
-        or "state" not in packet
-    ):
+    if packet.get("type") != "state" or "state" not in packet:
         return False, {
             "status": "error",
             "message": "Expected state packet",
@@ -215,56 +246,46 @@ class NabWebRfidReadView(View):
         is_idle, error_msg = await check_is_idle_state(reader)
         if not is_idle:
             return error_msg
-        # Enter interactive mode to get every rfid event (instead of apps)
-        packet = (
-            '{"type":"mode","mode":"interactive","events":["rfid/*"],'
-            '"request_id":"mode"}\r\n'
+
+        await NabdConnection.send_packet(
+            writer,
+            {
+                "type": "mode",
+                "mode": "interactive",
+                "events": ["rfid/*"],
+                "request_id": "mode",
+            },
         )
-        writer.write(packet.encode("utf8"))
-        await writer.drain()
-        while True:
-            line = await asyncio.wait_for(reader.readline(), 1.0)
-            packet = json.loads(line.decode("utf8"))
-            if (
-                "type" in packet
-                and packet["type"] == "response"
-                and "request_id" in packet
-                and packet["request_id"] == "mode"
-            ):
-                # Turn nose red to mean we're expecting a tag now
-                base64chor = base64.b64encode(
-                    bytes([0, 7, 4, 255, 0, 0, 0, 0])
-                )
-                packet = (
-                    b'{"type":"command","sequence":['
-                    b'{"choreography":'
-                    b'"data:application/x-nabaztag-mtl-choreography;base64,'
-                    + base64chor
-                    + b'"}]}\r\n'
-                )
-                writer.write(packet)
-                await writer.drain()
-                try:
-                    while True:
-                        line = await asyncio.wait_for(
-                            reader.readline(), timeout
-                        )
-                        packet = json.loads(line.decode("utf8"))
-                        if (
-                            "type" in packet
-                            and packet["type"] == "rfid_event"
-                            and packet["event"] != "removed"
-                        ):
-                            return {"status": "ok", "event": packet}
-                except asyncio.TimeoutError:
-                    return {
-                        "status": "timeout",
-                        "message": "No RFID tag was detected.",
-                    }
+
+        await NabdConnection.wait_for_response(reader, "mode", 1.0)
+
+        base64chor = base64.b64encode(bytes([0, 7, 4, 255, 0, 0, 0, 0]))
+        packet = (
+            b'{"type":"command","sequence":['
+            b'{"choreography":"data:application/x-nabaztag-mtl-choreography;base64,'
+            + base64chor
+            + b'"}]}\r\n'
+        )
+        await NabdConnection.send_packet(writer, packet)
+
+        try:
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout)
+                packet = json.loads(line.decode("utf8"))
+                if (
+                    packet.get("type") == "rfid_event"
+                    and packet.get("event") != "removed"
+                ):
+                    return {"status": "ok", "event": packet}
+        except asyncio.TimeoutError:
+            return {
+                "status": "timeout",
+                "message": "No RFID tag was detected.",
+            }
 
     def post(self, request, *args, **kwargs):
-        read_result = asyncio.run(
-            self.read_tag(NabWebRfidReadView.READ_TIMEOUT)
+        read_result = async_to_sync(self.read_tag)(
+            NabWebRfidReadView.READ_TIMEOUT
         )
         return JsonResponse(read_result)
 
@@ -283,47 +304,42 @@ class NabWebRfidWriteView(View):
         is_idle, error_msg = await check_is_idle_state(reader)
         if not is_idle:
             return error_msg
-        packet = {
-            "type": "rfid_write",
-            "tech": tech,
-            "uid": uid,
-            "picture": int(picture),
-            "app": app,
-            "data": data,
-            "request_id": "rfid_write",
-        }
-        packet_json = json.JSONEncoder().encode(packet)
-        packet = packet_json + "\r\n"
-        writer.write(packet.encode("utf8"))
-        await writer.drain()
-        while True:
-            try:
-                line = await asyncio.wait_for(reader.readline(), timeout)
-                packet = json.loads(line.decode("utf8"))
-                if (
-                    "type" in packet
-                    and packet["type"] == "response"
-                    and "request_id" in packet
-                    and packet["request_id"] == "rfid_write"
-                ):
-                    response = {
-                        "status": packet["status"],
-                        "rfid": {
-                            "tech": tech,
-                            "uid": uid,
-                            "picture": picture,
-                            "app": app,
-                            "data": data,
-                        },
-                    }
-                    if "message" in packet:
-                        response["message"] = packet["message"]
-                    return response
-            except asyncio.TimeoutError:
-                return {
-                    "status": "timeout",
-                    "message": "No RFID tag was detected.",
-                }
+
+        await NabdConnection.send_packet(
+            writer,
+            {
+                "type": "rfid_write",
+                "tech": tech,
+                "uid": uid,
+                "picture": int(picture),
+                "app": app,
+                "data": data,
+                "request_id": "rfid_write",
+            },
+        )
+
+        try:
+            packet = await NabdConnection.wait_for_response(
+                reader, "rfid_write", timeout
+            )
+            response = {
+                "status": packet["status"],
+                "rfid": {
+                    "tech": tech,
+                    "uid": uid,
+                    "picture": picture,
+                    "app": app,
+                    "data": data,
+                },
+            }
+            if "message" in packet:
+                response["message"] = packet["message"]
+            return response
+        except asyncio.TimeoutError:
+            return {
+                "status": "timeout",
+                "message": "No RFID tag was detected.",
+            }
 
     def post(self, request, *args, **kwargs):
         if (
@@ -336,18 +352,20 @@ class NabWebRfidWriteView(View):
                 {"status": "error", "message": "Missing arguments."},
                 status=400,
             )
+
         tech = request.POST["tech"]
         uid = request.POST["uid"]
         picture = request.POST["picture"]
         app = request.POST["app"]
-        if "data" in request.POST:
-            data = request.POST["data"]
-        else:
-            data = ""
-        write_result = asyncio.run(
-            self.write_tag(
-                tech, uid, picture, app, data, NabWebRfidReadView.READ_TIMEOUT
-            )
+        data = request.POST.get("data", "")
+
+        write_result = async_to_sync(self.write_tag)(
+            tech,
+            uid,
+            picture,
+            app,
+            data,
+            NabWebRfidReadView.READ_TIMEOUT,
         )
         return JsonResponse(write_result)
 
@@ -364,37 +382,45 @@ class NabWebSytemInfoView(BaseView):
             variant = "Raspberry Pi"
         else:
             variant = ""
+
         try:
             with open("/etc/os-release") as release_f:
-                line = release_f.readline()
-                matchObj = re.match(r'PRETTY_NAME="(.+)"$', line, re.M)
-                if matchObj:
-                    version = matchObj.group(1)
+                for line in release_f:
+                    match_obj = re.match(r'PRETTY_NAME="(.+)"$', line.strip())
+                    if match_obj:
+                        version = match_obj.group(1)
+                        break
         except FileNotFoundError:
             pass
+
         kernel_release = platform.release()
         kernel_build = platform.version()
         kernel_machine = platform.machine()
-        matchObj = re.match(r"#[0-9]+", kernel_build)
-        if matchObj:
-            kernel_build = matchObj.group()
+        match_obj = re.match(r"#[0-9]+", kernel_build)
+        if match_obj:
+            kernel_build = match_obj.group()
+
         version = (
             f"{version} - "
             f"Kernel {kernel_release} {kernel_build} {kernel_machine}"
         )
-        hostname = os.popen("hostname").read().rstrip()
-        ip_address = os.popen("hostname -I").read().rstrip()
-        wifi_essid = os.popen("iwgetid -r").read().rstrip()
+
+        hostname = _run_command_stdout(["hostname"])
+        ip_address = _run_command_stdout(["hostname", "-I"])
+        wifi_essid = _run_command_stdout(["iwgetid", "-r"])
+
         try:
             with open("/proc/uptime", "r") as uptime_f:
                 uptime = int(float(uptime_f.readline().split()[0]))
         except FileNotFoundError:
             uptime = 0
-        ssh_state = os.popen("systemctl is-active dropbear").read().rstrip()
+
+        ssh_state = _run_command_stdout(["systemctl", "is-active", "dropbear"])
         if ssh_state == "inactive":
-            ssh_state = os.popen("systemctl is-active ssh").read().rstrip()
+            ssh_state = _run_command_stdout(["systemctl", "is-active", "ssh"])
         if ssh_state == "active" and os.path.isfile("/run/sshwarn"):
             ssh_state = "sshwarn"
+
         return {
             "variant": variant,
             "version": version,
@@ -406,12 +432,11 @@ class NabWebSytemInfoView(BaseView):
         }
 
     def get_pi_info(self):
-        model = hardware.device_model()
-        return {"model": model}
+        return {"model": hardware.device_model()}
 
     def get_context(self):
         context = super().get_context()
-        gestalt = asyncio.run(self.query_gestalt())
+        gestalt = async_to_sync(self.query_gestalt)()
         context["gestalt"] = gestalt
         context["os"] = self.get_os_info()
         context["pi"] = self.get_pi_info()
@@ -428,21 +453,18 @@ class NabWebHardwareTestView(View):
 
     async def _do_hardware_test(self, reader, writer, test, timeout):
         try:
-            packet = (
-                f'{{"type":"test","test":"{test}","request_id":"test"}}\r\n'
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "test",
+                    "test": test,
+                    "request_id": "test",
+                },
             )
-            writer.write(packet.encode("utf8"))
-            await writer.drain()
-            while True:
-                line = await asyncio.wait_for(reader.readline(), timeout)
-                packet = json.loads(line.decode("utf8"))
-                if (
-                    "type" in packet
-                    and packet["type"] == "response"
-                    and "request_id" in packet
-                    and packet["request_id"] == "test"
-                ):
-                    return {"status": "ok", "result": packet}
+            packet = await NabdConnection.wait_for_response(
+                reader, "test", timeout
+            )
+            return {"status": "ok", "result": packet}
         except asyncio.TimeoutError:
             return {
                 "status": "error",
@@ -451,8 +473,8 @@ class NabWebHardwareTestView(View):
 
     def post(self, request, *args, **kwargs):
         test = kwargs.get("test")
-        test_result = asyncio.run(
-            self.hardware_test(test, NabWebHardwareTestView.TEST_TIMEOUT)
+        test_result = async_to_sync(self.hardware_test)(
+            test, NabWebHardwareTestView.TEST_TIMEOUT
         )
         return JsonResponse(test_result)
 
@@ -476,18 +498,25 @@ class GitInfo:
     }
 
     @staticmethod
+    def _git(repo_dir, *args, sudo_uid=None):
+        cmd = ["git", "-C", repo_dir, *args]
+        if sudo_uid is not None:
+            cmd = ["sudo", "-u", f"#{sudo_uid}"] + cmd
+        return _run_command(cmd)
+
+    @staticmethod
     def get_root_dir():
-        root_dir = (
-            os.popen(
-                "sed -nE -e 's|WorkingDirectory=(.+)|\\1|p' "
-                "< /lib/systemd/system/nabd.service"
-            )
-            .read()
-            .rstrip()
-        )
-        if root_dir == "":
-            root_dir = os.path.dirname(os.path.dirname(__file__))
-        return root_dir
+        service_file = "/lib/systemd/system/nabd.service"
+        try:
+            with open(service_file, "r") as f:
+                for line in f:
+                    if line.startswith("WorkingDirectory="):
+                        root_dir = line.split("=", 1)[1].strip()
+                        if root_dir:
+                            return root_dir
+        except FileNotFoundError:
+            pass
+        return os.path.dirname(os.path.dirname(__file__))
 
     @staticmethod
     def get_repository_info(repository, cached=False, force=False):
@@ -499,7 +528,7 @@ class GitInfo:
                 return info
         if cached:
             return None
-        info = GitInfo.do_get_repository_info(repository, relpath)
+        info = GitInfo.do_get_repository_info(repository, relpath, force=force)
         timeout = 600
         if info["status"] == "ok":
             timeout = 86400
@@ -507,17 +536,17 @@ class GitInfo:
         return info
 
     @staticmethod
-    def do_get_repository_info(repository, relpath):
+    def do_get_repository_info(repository, relpath, force=False):
         root_dir = GitInfo.get_root_dir()
         if root_dir is None:
             return {
                 "status": "error",
-                "message": "Cannot locate Pynab installation from "
-                "OS systemd services.",
+                "message": "Cannot locate Pynab installation from OS systemd services.",
                 "info_date": datetime.datetime.now(),
                 "name": GitInfo.NAMES[repository],
             }
-        repo_dir = root_dir + "/" + relpath
+
+        repo_dir = os.path.join(root_dir, relpath)
         try:
             repo_owner = str(os.stat(repo_dir).st_uid)
         except FileNotFoundError:
@@ -527,86 +556,70 @@ class GitInfo:
                 "info_date": datetime.datetime.now(),
                 "name": GitInfo.NAMES[repository],
             }
-        head_sha1 = (
-            os.popen(f"git -C {repo_dir} rev-parse HEAD").read().rstrip()
-        )
-        if head_sha1 == "":
+
+        rc, head_sha1, _ = GitInfo._git(repo_dir, "rev-parse", "HEAD")
+        if rc != 0 or head_sha1 == "":
             return {
                 "status": "error",
                 "message": "Cannot get HEAD - not a git repository?",
                 "info_date": datetime.datetime.now(),
                 "name": GitInfo.NAMES[repository],
             }
-        info = {}
-        info["head"] = head_sha1
-        info["branch"] = (
-            os.popen(f"git -C {repo_dir} rev-parse --abbrev-ref HEAD")
-            .read()
-            .rstrip()
+
+        info = {
+            "head": head_sha1,
+            "name": GitInfo.NAMES[repository],
+            "info_date": datetime.datetime.now(),
+        }
+
+        _, branch, _ = GitInfo._git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        info["branch"] = branch
+
+        _, upstream_branch, _ = GitInfo._git(
+            repo_dir, "rev-parse", "--abbrev-ref", "@{upstream}"
         )
-        upstream_branch = (
-            os.popen(
-                f"git -C {repo_dir} rev-parse --abbrev-ref @{{upstream}} "
-                f"2>/dev/null"
-            )
-            .read()
-            .rstrip()
-        )
-        # note: upstream_branch will be "" if on purely local branch
         info["upstream_branch"] = upstream_branch
-        remote = upstream_branch.split("/")[0]
-        # note: url will be "" if on purely local branch
-        info["url"] = (
-            os.popen(f"git -C {repo_dir} remote get-url {remote} 2>/dev/null")
-            .read()
-            .rstrip()
-        )
-        info["local_changes"] = (
-            os.popen(
-                f"(git -C {repo_dir} status -s) >/dev/null && "
-                f"git -C {repo_dir} diff-index --quiet HEAD -- || "
-                f"echo 'local_changes' "
+
+        remote = upstream_branch.split("/")[0] if upstream_branch else ""
+        if remote:
+            _, url, _ = GitInfo._git(repo_dir, "remote", "get-url", remote)
+        else:
+            url = ""
+        info["url"] = url
+
+        rc, _, _ = GitInfo._git(repo_dir, "diff-index", "--quiet", "HEAD", "--")
+        info["local_changes"] = rc != 0
+
+        if force and upstream_branch:
+            GitInfo._git(repo_dir, "fetch", "-t", "-f", sudo_uid=repo_owner)
+
+        if upstream_branch:
+            rc, commits_count, _ = GitInfo._git(
+                repo_dir, "rev-list", "--count", f"HEAD..{upstream_branch}"
             )
-            .read()
-            .strip()
-            != ""
-        )
-        commits_count = (
-            os.popen(
-                f"sudo -u \\#{repo_owner} "
-                f"git -C {repo_dir} fetch -t -f >/dev/null && "
-                f"git -C {repo_dir} rev-list --count HEAD..{upstream_branch}"
+            _, local_commits_count, _ = GitInfo._git(
+                repo_dir, "rev-list", "--count", f"{upstream_branch}..HEAD"
             )
-            .read()
-            .rstrip()
-        )
-        local_commits_count = (
-            os.popen(
-                f"git -C {repo_dir} rev-list --count {upstream_branch}..HEAD"
-            )
-            .read()
-            .rstrip()
-        )
-        if commits_count == "":
-            info["status"] = "error"
-            info["message"] = (
-                "Cannot get number of commits from upstream. "
-                "Not connected to the internet?"
-            )
+            if rc != 0 or commits_count == "":
+                info["status"] = "error"
+                info["message"] = (
+                    "Cannot get number of commits from upstream. "
+                    "Not connected to the internet?"
+                )
+            else:
+                info["status"] = "ok"
+                info["commits_count"] = int(commits_count)
+                info["local_commits_count"] = int(local_commits_count or 0)
         else:
             info["status"] = "ok"
-            info["commits_count"] = int(commits_count)
-            info["local_commits_count"] = int(local_commits_count)
-        info["tag"] = (
-            os.popen(
-                f"git -C {repo_dir} describe --long --tags --always "
-                f"2>/dev/null"
-            )
-            .read()
-            .strip()
+            info["commits_count"] = 0
+            info["local_commits_count"] = 0
+
+        _, tag, _ = GitInfo._git(
+            repo_dir, "describe", "--long", "--tags", "--always"
         )
-        info["info_date"] = datetime.datetime.now()
-        info["name"] = GitInfo.NAMES[repository]
+        info["tag"] = tag
+
         return info
 
 
@@ -675,45 +688,58 @@ class NabWebUpgradeNowView(View):
     root_owner = "1000"
 
     def get(self, request, *args, **kwargs):
-        step = (
-            os.popen(
-                f"sudo -u \\#{self.root_owner} "
-                f"flock -n /tmp/pynab.upgrade echo 'Not upgrading' "
-                f"|| cat /tmp/pynab.upgrade"
-            )
-            .read()
-            .rstrip()
-        )
+        cmd = [
+            "sudo",
+            "-u",
+            f"#{self.root_owner}",
+            "flock",
+            "-n",
+            "/tmp/pynab.upgrade",
+            "bash",
+            "-lc",
+            "echo 'Not upgrading' || cat /tmp/pynab.upgrade",
+        ]
+        _, step, _ = _run_command(cmd)
         if step == "Not upgrading":
             return JsonResponse({"status": "done"})
-        else:
-            return JsonResponse({"status": "ok", "message": step})
+        return JsonResponse({"status": "ok", "message": step})
 
     def post(self, request, *args, **kwargs):
         root_dir = GitInfo.get_root_dir()
         if root_dir is None:
-            return {
-                "status": "error",
-                "message": "Cannot locate Pynab installation from "
-                "OS systemd services.",
-            }
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "Cannot locate Pynab installation from OS systemd services.",
+                }
+            )
+
         try:
             self.root_owner = str(os.stat(root_dir).st_uid)
         except FileNotFoundError:
-            return {
-                "status": "error",
-                "message": "Pynab installation directory not found.",
-            }
-        locked = (
-            os.popen(
-                f"sudo -u \\#{self.root_owner} "
-                f"flock -n /tmp/pynab.upgrade echo 'OK' "
-                f"|| echo 'Locked'"
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": "Pynab installation directory not found.",
+                }
             )
-            .read()
-            .rstrip()
-        )
+
+        cmd = [
+            "sudo",
+            "-u",
+            f"#{self.root_owner}",
+            "flock",
+            "-n",
+            "/tmp/pynab.upgrade",
+            "bash",
+            "-lc",
+            "echo 'OK'",
+        ]
+        _, locked, _ = _run_command(cmd)
+
         if locked == "OK":
+            stdout_f = open("/tmp/pynab-upgrade-stdout.log", "w")
+            stderr_f = open("/tmp/pynab-upgrade-stderr.log", "w")
             command = [
                 "/usr/bin/nohup",
                 "sudo",
@@ -726,13 +752,15 @@ class NabWebUpgradeNowView(View):
             ]
             subprocess.Popen(
                 command,
-                stdout=open("/tmp/pynab-upgrade-stdout.log", "w"),
-                stderr=open("/tmp/pynab-upgrade-stderr.log", "w"),
+                stdout=stdout_f,
+                stderr=stderr_f,
                 preexec_fn=os.setpgrp,
             )
             return JsonResponse({"status": "ok"})
-        if locked == "Locked":
+
+        if locked == "":
             return JsonResponse({"status": "ok"})
+
         return JsonResponse(
             {
                 "status": "error",
@@ -749,24 +777,20 @@ class NabWebShutdownView(View):
 
     async def _do_os_shutdown(self, reader, writer, mode):
         try:
-            packet = (
-                f'{{"type":"shutdown","mode":"{mode}",'
-                f'"request_id":"shutdown"}}\r\n'
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "shutdown",
+                    "mode": mode,
+                    "request_id": "shutdown",
+                },
             )
-            writer.write(packet.encode("utf8"))
-            await writer.drain()
-            while True:
-                line = await asyncio.wait_for(
-                    reader.readline(), NabWebShutdownView.SHUTDOWN_TIMEOUT
-                )
-                packet = json.loads(line.decode("utf8"))
-                if (
-                    "type" in packet
-                    and packet["type"] == "response"
-                    and "request_id" in packet
-                    and packet["request_id"] == "shutdown"
-                ):
-                    return {"status": "ok", "result": packet}
+            packet = await NabdConnection.wait_for_response(
+                reader,
+                "shutdown",
+                NabWebShutdownView.SHUTDOWN_TIMEOUT,
+            )
+            return {"status": "ok", "result": packet}
         except asyncio.TimeoutError:
             return {
                 "status": "error",
@@ -775,5 +799,5 @@ class NabWebShutdownView(View):
 
     def post(self, request, *args, **kwargs):
         mode = kwargs.get("mode")
-        shutdown_result = asyncio.run(self.os_shutdown(mode))
+        shutdown_result = async_to_sync(self.os_shutdown)(mode)
         return JsonResponse(shutdown_result)
