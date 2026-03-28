@@ -17,13 +17,13 @@ from lockfile import AlreadyLocked, LockFailed  # type: ignore
 from lockfile.pidlockfile import PIDLockFile  # type: ignore
 
 from nabcommon import nablogging, settings
-
 from .typing import NabdPacket
 
 
 class NabService(ABC):
     PORT_NUMBER = int(os.getenv("NABD_PORT_NUMBER", "10543"))
     HOST = os.getenv("NABD_HOST", "127.0.0.1")
+    MAX_RETRY = 10
 
     def __init__(self):
         settings.configure(type(self).__name__.lower())
@@ -34,9 +34,10 @@ class NabService(ABC):
         signal.signal(signal.SIGUSR1, self.signal_handler)
 
     def signal_handler(self, sig, frame):
-        self.loop.call_soon_threadsafe(
-            lambda: self.loop.create_task(self.reload_config())
-        )
+        if self.loop is not None and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(
+                lambda: self.loop.create_task(self.reload_config())
+            )
 
     @abstractmethod
     async def reload_config(self):
@@ -55,6 +56,7 @@ class NabService(ABC):
             asr_support = os.path.isdir(os.path.join(service_dir, "nlu"))
             rfid_support = False
             events = []
+
             if hasattr(package, "NABAZTAG_RFID_APPLICATION_ID"):
                 rfid_support = True
             if hasattr(package, "NABAZTAG_EVENTS_SUBSCRIPTION"):
@@ -62,6 +64,7 @@ class NabService(ABC):
                     json.dumps(event)
                     for event in package.NABAZTAG_EVENTS_SUBSCRIPTION
                 ]
+
             if events != [] or asr_support or rfid_support:
                 service_name = self.__class__.__name__.lower()
                 if asr_support:
@@ -75,29 +78,32 @@ class NabService(ABC):
                     + "]}\r\n"
                 )
                 self.writer.write(idle_packet.encode("utf8"))
+                await self.writer.drain()
+
             while self.running and not self.reader.at_eof():
                 line = await self.reader.readline()
                 if line != b"" and line != b"\r\n":
                     try:
                         packet = json.loads(line.decode("utf8"))
                         logging.debug(f"process nabd packet: {packet}")
-                        await self.process_nabd_packet(
-                            cast(NabdPacket, packet)
-                        )
+                        await self.process_nabd_packet(cast(NabdPacket, packet))
                     except json.decoder.JSONDecodeError as e:
                         logging.error(
                             f"Invalid JSON packet from nabd: {line}\n{e}"
                         )
-            self.writer.close()
-            await self.writer.wait_closed()
         except KeyboardInterrupt:
             pass
         finally:
+            try:
+                if self.writer is not None:
+                    self.writer.close()
+                    await self.writer.wait_closed()
+            except Exception:
+                logging.debug(traceback.format_exc())
+
             if self.running:
                 await self.stop_service_loop()
-            self.loop.stop()
-
-    MAX_RETRY = 10
+                self.loop.stop()
 
     def connect(self):
         self.loop = asyncio.get_event_loop()
@@ -105,22 +111,28 @@ class NabService(ABC):
         self.loop.create_task(self.client_loop())
 
     def _do_connect(self, retry_count: int) -> None:
-        connection = asyncio.open_connection(
-            host=NabService.HOST, port=NabService.PORT_NUMBER
-        )
-        try:
-            (reader, writer) = self.loop.run_until_complete(connection)
-            self.reader = reader
-            self.writer = writer
-        except ConnectionRefusedError:
-            if retry_count == 0:
-                print("Could not connect to server. Is nabd running?")
-                logging.critical(
-                    "Could not connect to server. Is nabd running?"
-                )
-                exit(1)
-            time.sleep(1)
-            self._do_connect(retry_count - 1)
+        assert self.loop is not None
+
+        for attempt in range(retry_count + 1):
+            connection = asyncio.open_connection(
+                host=NabService.HOST,
+                port=NabService.PORT_NUMBER,
+            )
+            try:
+                reader, writer = self.loop.run_until_complete(connection)
+                self.reader = reader
+                self.writer = writer
+                return
+            except ConnectionRefusedError:
+                if attempt >= retry_count:
+                    print("Could not connect to server. Is nabd running?")
+                    logging.critical(
+                        "Could not connect to server. Is nabd running?"
+                    )
+                    exit(1)
+
+                sleep_s = min(1.0 + (attempt * 0.5), 3.0)
+                time.sleep(sleep_s)
 
     def run(self):
         self.connect()
@@ -134,12 +146,16 @@ class NabService(ABC):
         except KeyboardInterrupt:
             pass
         finally:
-            self.writer.close()
+            if self.writer is not None:
+                self.writer.close()
+                self.loop.run_until_complete(self.writer.wait_closed())
+
             self.loop.run_until_complete(self.stop_service_loop())
             tasks = asyncio.all_tasks(self.loop)
-            # give canceled tasks the last chance to run
+
             for t in [t for t in tasks if not (t.done() or t.cancelled())]:
                 self.loop.run_until_complete(t)
+
             self.loop.close()
 
     def start_service_loop(
@@ -147,8 +163,7 @@ class NabService(ABC):
     ) -> Optional[asyncio.Task]:
         """
         Start a service loop, if any.
-        Typically:
-        return loop.create_task(self.service_loop())
+        Typically: return loop.create_task(self.service_loop())
         """
         return None
 
@@ -156,9 +171,9 @@ class NabService(ABC):
         """
         Signal service loop to stop.
         Typically:
-        async with self.loop_cv:
-            self.running = False  # signal to exit
-            self.loop_cv.notify()
+          async with self.loop_cv:
+              self.running = False  # signal to exit
+              self.loop_cv.notify()
         """
         return None
 
@@ -169,8 +184,7 @@ class NabService(ABC):
         try:
             with open(pidfilepath, "r") as f:
                 pidstr = f.read()
-            os.kill(int(pidstr), signal.SIGUSR1)
-        # Silently ignore the fact that the daemon is not running
+                os.kill(int(pidstr), signal.SIGUSR1)
         except OSError:
             pass
 
@@ -181,8 +195,8 @@ class NabService(ABC):
         pidfilepath = f"/run/{service_name}.pid"
         usage = (
             f"{service_name} [options]\n"
-            f" -h                   display this message\n"
-            f" --pidfile=<pidfile>  define pidfile (default = {pidfilepath})\n"
+            f" -h display this message\n"
+            f" --pidfile= define pidfile (default = {pidfilepath})\n"
         )
         try:
             opts, args = getopt.getopt(argv, "h", ["pidfile="])
@@ -225,8 +239,8 @@ class NabService(ABC):
 class NabRecurrentService(NabService, ABC):
     """
     Base class for recurrent services that can be triggered from the website.
-    Next performance time is saved in database.
-    Reload configuration on USR1 signal.
+    Next performance time is saved in database. Reload configuration on USR1
+    signal.
     """
 
     class Reason(Enum):
@@ -234,11 +248,8 @@ class NabRecurrentService(NabService, ABC):
         Reason for computing next performance.
         """
 
-        # Service just booted
         BOOT = 1
-        # Service got a SIGUSR1
         CONFIG_RELOADED = 2
-        # Perform was called
         PERFORMANCE_PLAYED = 3
 
     def __init__(self):
@@ -251,18 +262,15 @@ class NabRecurrentService(NabService, ABC):
         """
         Perform a database operation to retrieve stored data and return a tuple
         with three values used by the service:
-
         next_date: next time the performance should happen.
         next_args: some service-specific argument for the performance.
         config: some additional configuration to be used to compute any future
         performance.
-
         Typical implementation is:
-
-        from . import models
-        record = await models.Config.load_async()
-        config = (record.config_a, record.config_b)
-        return (record.next_date, record.next_args, config)
+          from . import models
+          record = await models.Config.load_async()
+          config = (record.config_a, record.config_b)
+          return (record.next_date, record.next_args, config)
         """
 
     @abstractmethod
@@ -271,13 +279,12 @@ class NabRecurrentService(NabService, ABC):
     ) -> None:
         """
         Write new next date and args to database.
-
         Typical implementation is:
-        from . import models
-        record = await models.Config.load_async()
-        record.next_date = next_date
-        record.next_args = next_args
-        await record.save_async()
+          from . import models
+          record = await models.Config.load_async()
+          record.next_date = next_date
+          record.next_args = next_args
+          await record.save_async()
         """
 
     @abstractmethod
@@ -292,21 +299,17 @@ class NabRecurrentService(NabService, ABC):
         Compute next performance based on reason and config.
         Return None if no further performance should be scheduled.
         Otherwise, return tuple (next_date, next_args)
-
         reason (from enum Reason) describes why compute_next was invoked.
         saved_date and saved_args are current database values and could be
         returned if they are correct (typically on boot).
         config is the third value returned by get_config.
-
         This function should be pure (no side-effect).
         """
 
     @abstractmethod
     async def perform(self, expiration_date, args, config):
         """
-        Perform the action.
-
-        This function should not refer to the database.
+        Perform the action. This function should not refer to the database.
         expiration_date is to be passed in the packet(s) written to nabd.
         args is whatever was computed by compute_next
         """
@@ -321,9 +324,7 @@ class NabRecurrentService(NabService, ABC):
         try:
             async with self.loop_cv:
                 while self.running:
-                    # Load or reload configuration
                     next_date, next_args, config = await self._load_config()
-                    # Determine if it's time to perform
                     now = datetime.datetime.now(datetime.timezone.utc)
                     if next_date is not None and next_date <= now:
                         await self.perform(
@@ -331,7 +332,6 @@ class NabRecurrentService(NabService, ABC):
                             next_args,
                             config,
                         )
-                        # reset date after performance
                         await self.update_next(None, None)
                         self.reason = (
                             NabRecurrentService.Reason.PERFORMANCE_PLAYED
@@ -360,7 +360,7 @@ class NabRecurrentService(NabService, ABC):
 
     async def stop_service_loop(self):
         async with self.loop_cv:
-            self.running = False  # signal to exit
+            self.running = False
             self.loop_cv.notify()
 
     async def _load_config(self):
@@ -411,27 +411,25 @@ class NabRandomService(NabRecurrentService, ABC):
             return saved_date, saved_args
         if reason == NabRecurrentService.Reason.BOOT:
             return saved_date, saved_args
-        next = self.do_compute_next(frequency)
-        if next is None:
+        next_value = self.do_compute_next(frequency)
+        if next_value is None:
             return None
-        return (next, None)
+        return (next_value, None)
 
 
 class NabInfoService(NabRecurrentService, ABC):
     """
-    Base class for services that display info (animations) updated on a regular
-    basis from an external source (weather, air quality) and which can be
-    triggered from the website.
-
-    next_args is "info" for only updating infos, or any other text for messages
-    (e.g. "today" for today forecast).
+    Base class for services that display info (animations) updated on a
+    regular basis from an external source (weather, air quality) and which
+    can be triggered from the website.
+    next_args is "info" for only updating infos, or any other text for
+    messages (e.g. "today" for today forecast).
     """
 
     def next_info_update(self, config):
         """
-        Return the next time the info should be updated after performance was
-        played, or None if it should not be updated.
-
+        Return the next time the info should be updated after performance
+        was played, or None if it should not be updated.
         Default implementation is to update info every hour.
         """
         if config is None:
@@ -457,12 +455,11 @@ class NabInfoService(NabRecurrentService, ABC):
         self, expiration_date, type, info_data, config
     ):
         """
-        Perform whatever additional message, typically triggered from ASR
-        or the website.
+        Perform whatever additional message, typically triggered from ASR or
+        the website.
         """
 
     async def perform(self, expiration_date, type, config):
-        # Always fetch info data.
         logging.debug(f"fetch_info_data type = {type}")
         info_data = await self._do_fetch_info_data(config)
         info_animation = self.get_animation(info_data)
@@ -477,9 +474,14 @@ class NabInfoService(NabRecurrentService, ABC):
             )
         else:
             info_packet = (
-                '{"type":"info","info_id":"' + service_name + '"}\r\n'
+                '{"type":"info","info_id":"'
+                + service_name
+                + '"}\r\n'
             )
+
         self.writer.write(info_packet.encode("utf8"))
+        await self.writer.drain()
+
         if type != "info":
             await self.perform_additional(
                 expiration_date, type, info_data, config
@@ -512,7 +514,6 @@ class NabInfoCachedService(NabInfoService, ABC):
     """
     Base class for an info service which additionally caches the remote info
     locally, to minimize delay for on-demand performances (voice, website).
-
     Info is cached for 1 hour.
     """
 
@@ -535,6 +536,7 @@ class NabInfoCachedService(NabInfoService, ABC):
             and self.cached_info_expdate > now
         ):
             return self.cached_info
+
         next_hour = now + datetime.timedelta(seconds=3600)
         new_info = await self.fetch_info_data(config)
         self.cached_info = new_info
