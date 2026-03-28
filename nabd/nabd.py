@@ -104,12 +104,14 @@ class Nabd:
         self.nabio = nabio
         self.idle_cv = asyncio.Condition()
         self.idle_queue: Deque[IdleQueueItem] = collections.deque()
-        # Cache état réseau
+        self._idle_non_sleep_count = 0
+
         self._network_status_cache = {
             "ts": 0.0,
             "has_ip": None,
             "has_internet": None,
         }
+
         # Current position of ears in idle mode
         self.ears = {
             "left": Nabd.INIT_EAR_POSITION,
@@ -147,26 +149,33 @@ class Nabd:
             self.asr = None
             self.nlu = None
 
+    def _idle_queue_append(self, item: IdleQueueItem) -> None:
+        self.idle_queue.append(item)
+        if item[0]["type"] != "sleep":
+            self._idle_non_sleep_count += 1
+
+    def _idle_queue_popleft(self) -> IdleQueueItem:
+        item = self.idle_queue.popleft()
+        if item[0]["type"] != "sleep":
+            self._idle_non_sleep_count -= 1
+        return item
+
     async def _get_network_status(self):
         now = time.monotonic()
-        ttl = 30.0  # secondes
+        ttl = 30.0
 
-        # 1) Retourne le cache si encore valide
         if now - self._network_status_cache["ts"] < ttl:
             return (
                 self._network_status_cache["has_ip"],
                 self._network_status_cache["has_internet"],
             )
 
-        # 2) Vérifie d'abord si l'interface a une IP
         has_ip = network.ip_address(self.nabio.network_interface()) is not None
 
-        # 3) Ne teste Internet que si une IP existe
         has_internet = False
         if has_ip:
             has_internet = await asyncio.to_thread(network.internet_connection)
 
-        # 4) Met à jour le cache
         self._network_status_cache = {
             "ts": now,
             "has_ip": has_ip,
@@ -213,15 +222,13 @@ class Nabd:
         left, right = self.ears["left"], self.ears["right"]
         await self.nabio.move_ears_with_leds((255, 0, 255), left, right)
         self.nabio.pulse(Led.BOTTOM, (255, 0, 255))  # Fuchsia
-        
+
         has_ip, has_internet = await self._get_network_status()
 
         if not has_ip:
-            # pas de réseau local
             logging.error("no network connection")
             self.nabio.pulse(Led.BOTTOM, (255, 0, 0))  # Red
         elif not has_internet:
-            # réseau local OK, mais pas d'accès Internet
             logging.warning("no Internet access")
             self.nabio.pulse(Led.BOTTOM, (255, 165, 0))  # Orange
 
@@ -241,9 +248,8 @@ class Nabd:
             async with self.idle_cv:
                 await self._do_transition_to_idle()
                 while self.running:
-                    # Check if we have something to do.
                     if self.state == State.IDLE and len(self.idle_queue) > 0:
-                        item = self.idle_queue.popleft()
+                        item = self._idle_queue_popleft()
                         await self.process_idle_item(item)
                     else:
                         if (
@@ -270,7 +276,7 @@ class Nabd:
 
     async def stop_idle_worker(self):
         async with self.idle_cv:
-            self.running = False  # signal to exit
+            self.running = False
             self.idle_cv.notify()
 
     async def exit_interactive(self):
@@ -279,8 +285,6 @@ class Nabd:
         Restarts idle loop worker.
         Thread: service_loop
         """
-        # interactive -> playing or interactive -> idle depending on the
-        # command queue
         self.interactive_service_writer = None
         await self.transition_to(State.IDLE)
 
@@ -299,7 +303,7 @@ class Nabd:
                     await self.set_state(State.IDLE)
                     break
                 else:
-                    item = self.idle_queue.popleft()
+                    item = self._idle_queue_popleft()
             else:
                 if item[0]["type"] == "command":
                     await self.set_state(State.PLAYING)
@@ -308,7 +312,8 @@ class Nabd:
                         await self.set_state(State.IDLE)
                         break
                     else:
-                        item = self.idle_queue.popleft()
+                        item = self._idle_queue_popleft()
+
                 elif item[0]["type"] == "message":
                     await self.set_state(State.PLAYING)
                     await self.perform(item[0], item[1])
@@ -316,20 +321,16 @@ class Nabd:
                         await self.set_state(State.IDLE)
                         break
                     else:
-                        item = self.idle_queue.popleft()
+                        item = self._idle_queue_popleft()
+
                 elif item[0]["type"] == "sleep":
-                    # Check idle_queue doesn't only include 'sleep' items.
-                    has_non_sleep = False
-                    for other_item in self.idle_queue:
-                        if other_item[0]["type"] != "sleep":
-                            has_non_sleep = True
-                            break
-                    if has_non_sleep:
-                        self.idle_queue.append(item)
+                    if self._idle_non_sleep_count > 0:
+                        self._idle_queue_append(item)
                     else:
                         self.write_response_packet(item[0], STATUS_OK, item[1])
                         await self.set_state(State.ASLEEP)
                         break
+
                 elif (
                     item[0]["type"] == "mode"
                     and item[0]["mode"] == "interactive"
@@ -342,6 +343,7 @@ class Nabd:
                     else:
                         self.interactive_service_events = ["ears", "button"]
                     break
+
                 elif item[0]["type"] == "test":
                     await self.set_state(State.PLAYING)
                     await self.do_process_test_packet(
@@ -351,20 +353,20 @@ class Nabd:
                         await self.set_state(State.IDLE)
                         break
                     else:
-                        item = self.idle_queue.popleft()
+                        item = self._idle_queue_popleft()
+
                 elif item[0]["type"] == "rfid_write":
                     await self.do_process_rfid_write_packet(item[0], item[1])
                     if len(self.idle_queue) == 0:
                         await self.set_state(State.IDLE)
                         break
                     else:
-                        item = self.idle_queue.popleft()
+                        item = self._idle_queue_popleft()
+
                 else:
                     raise RuntimeError(f"Unexpected packet {item[0]}")
 
     def is_past(self, isodatestr):
-        # Python 3.7's fromisoformat only parses output of isoformat, not all
-        # valid ISO 8601 dates.
         parsed = dateutil.parser.isoparse(isodatestr)
         if parsed.tzinfo:
             return parsed < datetime.datetime.now().astimezone()
@@ -398,7 +400,6 @@ class Nabd:
     async def process_info_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process an info packet"""
         packet = self.__check_info_packet(any_packet, writer)
         if packet:
             if "animation" in packet:
@@ -406,7 +407,6 @@ class Nabd:
             elif packet["info_id"] in self.info:
                 del self.info[packet["info_id"]]
             self.write_response_packet(packet, STATUS_OK, writer)
-            # Signal idle loop to make sure we display updated info
             async with self.idle_cv:
                 self.idle_cv.notify()
 
@@ -474,7 +474,6 @@ class Nabd:
     async def process_ears_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process an ears packet"""
         packet = self.__check_ears_packet(any_packet, writer)
         if packet:
             if "left" in packet:
@@ -483,7 +482,6 @@ class Nabd:
                 self.ears["right"] = packet["right"]
             if self.state == State.IDLE:
                 if "event" in packet and packet["event"]:
-                    # Simulate an ears_event
                     now = time.time()
                     self.broadcast_event(
                         "ears",
@@ -546,13 +544,11 @@ class Nabd:
     async def process_command_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a command packet"""
         await self.process_perform_packet("sequence", packet, writer)
 
     async def process_message_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a message packet"""
         await self.process_perform_packet("body", packet, writer)
 
     async def process_perform_packet(
@@ -565,11 +561,10 @@ class Nabd:
         packet = self.__check_perform_packet(any_packet, slot, writer)
         if packet:
             if self.interactive_service_writer == writer:
-                # interactive => play command immediately, asynchronously
                 self.loop.create_task(self.perform(packet, writer))
             else:
                 async with self.idle_cv:
-                    self.idle_queue.append((packet, writer))
+                    self._idle_queue_append((packet, writer))
                     self.idle_cv.notify()
 
     def __check_perform_packet(
@@ -587,7 +582,6 @@ class Nabd:
     async def process_cancel_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a cancel packet"""
         if "request_id" in packet:
             request_id = packet["request_id"]
             if self.playing_request_id == request_id:
@@ -624,7 +618,6 @@ class Nabd:
     async def process_wakeup_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a wakeup packet"""
         assert packet["type"] == "wakeup"
         self.write_response_packet(packet, STATUS_OK, writer)
         if self.state == State.ASLEEP:
@@ -633,20 +626,18 @@ class Nabd:
     async def process_sleep_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a sleep packet"""
         assert any_packet["type"] == "sleep"
         packet = cast(SleepPacket, any_packet)
         if self.state == State.ASLEEP:
             self.write_response_packet(packet, STATUS_OK, writer)
         else:
             async with self.idle_cv:
-                self.idle_queue.append((packet, writer))
+                self._idle_queue_append((packet, writer))
                 self.idle_cv.notify()
 
     async def process_mode_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a mode packet"""
         packet = self.__check_mode_packet(any_packet, writer)
         if not packet:
             return
@@ -668,15 +659,14 @@ class Nabd:
                 )
             else:
                 async with self.idle_cv:
-                    self.idle_queue.append((packet, writer))
+                    self._idle_queue_append((packet, writer))
                     self.idle_cv.notify()
-        else:  # packet["mode"] == "idle":
+        else:
             if "events" in packet:
                 self.service_writers[writer] = packet["events"]
             else:
                 self.service_writers[writer] = []
             if writer == self.interactive_service_writer:
-                # exit interactive mode.
                 await self.exit_interactive()
             self.write_response_packet(packet, STATUS_OK, writer)
 
@@ -706,7 +696,6 @@ class Nabd:
     async def process_gestalt_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a gestalt packet"""
         proc = subprocess.Popen(
             ["ps", "-o", "etimes", "-p", str(os.getpid()), "--no-headers"],
             stdout=subprocess.PIPE,
@@ -726,7 +715,6 @@ class Nabd:
     async def process_config_update_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a config_update packet"""
         if "service" not in packet:
             self.write_response_packet(
                 packet,
@@ -744,14 +732,13 @@ class Nabd:
     async def process_test_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a test packet (for hardware tests)"""
         packet = self.__check_test_packet(any_packet, writer)
         if packet:
             if self.state == State.ASLEEP:
                 await self.do_process_test_packet(packet, writer)
             else:
                 async with self.idle_cv:
-                    self.idle_queue.append((packet, writer))
+                    self._idle_queue_append((packet, writer))
                     self.idle_cv.notify()
 
     def __check_test_packet(
@@ -783,20 +770,18 @@ class Nabd:
     async def process_rfid_write_packet(
         self, any_packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """Process a rfid_write packet"""
         packet = self.__check_rfid_write_packet(any_packet, writer)
         if packet is not None:
             if self.state == State.ASLEEP:
                 await self.do_process_rfid_write_packet(packet, writer)
             else:
                 async with self.idle_cv:
-                    self.idle_queue.append((packet, writer))
+                    self._idle_queue_append((packet, writer))
                     self.idle_cv.notify()
 
     async def do_process_rfid_write_packet(
         self, packet: RfidWritePacket, writer: asyncio.StreamWriter
     ) -> None:
-        """Process a rfid_write packet"""
         if self.nabio.rfid is None:
             self.write_response_packet(
                 packet,
@@ -896,10 +881,6 @@ class Nabd:
     async def process_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        """
-        Process a packet from a service
-        Thread: service_loop
-        """
         logging.debug(f"packet from service: {packet}")
         processors = {
             "info": self.process_info_packet,
@@ -983,7 +964,6 @@ class Nabd:
     def write_state_packet(self, writer: asyncio.StreamWriter):
         self.write_packet({"type": "state", "state": self.state.value}, writer)
 
-    # Handle service through TCP/IP protocol
     async def service_loop(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
@@ -1062,9 +1042,6 @@ class Nabd:
     def button_callback(
         self, button_event: ButtonEventType, event_time: float
     ):
-        """
-        Thread: run_loop
-        """
         if button_event == "hold" and self.state == State.IDLE:
             asyncio.ensure_future(self.start_asr())
         elif button_event == "up" and self.state == State.RECORDING:
@@ -1092,9 +1069,6 @@ class Nabd:
             )
 
     async def start_asr(self):
-        """
-        Thread: run_loop
-        """
         assert self.asr is not None
         await self.transition_to(State.RECORDING)
         if self.nabio.rfid is not None:
@@ -1107,7 +1081,6 @@ class Nabd:
         await self.nabio.end_acquisition()
         now = time.time()
         decoded_str = await self.asr.get_decoded_string(True)
-        # ASR model needs to be improved, log outcome.
         logging.debug(f"ASR string: {decoded_str}")
         response = await self.nlu.interpret(decoded_str)
         logging.debug(f"NLU response: {str(response)}")
@@ -1115,7 +1088,6 @@ class Nabd:
             self.nabio.rfid.enable_polling()
         await self.transition_to(State.IDLE)
         if response is None:
-            # Did not understand
             await self.nabio.asr_failed()
         else:
             event_type = "asr/*"
@@ -1144,10 +1116,8 @@ class Nabd:
 
     def ears_callback(self, ear):
         if self.interactive_service_writer:
-            # Cancel any previously registered timer
             if self._ears_moved_task:
                 self._ears_moved_task.cancel()
-            # Tell services
             if ear == Ears.LEFT_EAR:
                 ear_str = "left"
             else:
@@ -1159,9 +1129,6 @@ class Nabd:
                     self.interactive_service_writer,
                 )
         else:
-            # Wait a little bit for user to continue moving the ears
-            # Then we'll run a detection and tell services if we're not
-            # sleeping.
             if self._ears_moved_task:
                 self._ears_moved_task.cancel()
             self._ears_moved_task = asyncio.ensure_future(self._ears_moved())
@@ -1187,7 +1154,6 @@ class Nabd:
     def rfid_callback(
         self, tech, uid, picture, app, app_data, flags, tag_info
     ):
-        # bytes.hex(sep) is python 3.8+
         uid_str = ":".join("{:02x}".format(c) for c in uid)
         packet = {
             "type": "rfid_event",
@@ -1289,7 +1255,6 @@ class Nabd:
                 self.loop.run_until_complete(writer.wait_closed())
             tasks = asyncio.all_tasks(self.loop)
             for t in [t for t in tasks if not (t.done() or t.cancelled())]:
-                # give canceled tasks the last chance to run
                 try:
                     self.loop.run_until_complete(t)
                 except asyncio.CancelledError:
@@ -1307,8 +1272,6 @@ class Nabd:
         Animation to indicate boot progress.
         Useful as loading ASR/NLU model takes some time.
         """
-        # Step 0 is actually used for shutdown. Same values are in nabboot.py
-        # for startup led values.
         if step == 0:
             nabio.set_leds(
                 (255, 0, 255),
@@ -1356,12 +1319,10 @@ class Nabd:
         pidfilepath = "/run/nabd.pid"
         hardware_platform = hardware.device_model()
         if hardware.is_pi_zero(hardware_platform):
-            # running on Pi Zero or Zero 2 hardware
             from .nabio_hw import NabIOHW
 
             nabiocls: Type[NabIO] = NabIOHW
         else:
-            # other hardware: go virtual
             from .nabio_virtual import NabIOVirtual
 
             nabiocls: Type[NabIO] = NabIOVirtual
