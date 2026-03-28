@@ -131,7 +131,9 @@ class Nabd:
         self.loop: Optional[asyncio.events.AbstractEventLoop] = None
         self._ears_moved_task: Optional[asyncio.Future] = None
         self.playing_cancelable = False
+        self.playing_canceled = False
         self.playing_request_id: Optional[str] = None
+
         Nabd.leds_boot(self.nabio, 2)
         if self.nabio.has_sound_input():
             from . import i18n
@@ -696,20 +698,30 @@ class Nabd:
     async def process_gestalt_packet(
         self, packet: AnyPacket, writer: asyncio.StreamWriter
     ):
-        proc = subprocess.Popen(
-            ["ps", "-o", "etimes", "-p", str(os.getpid()), "--no-headers"],
-            stdout=subprocess.PIPE,
-        )
-        proc.wait()
         response: ResponseGestaltPacketProto = {
             "state": self.state.value,
             "connections": len(self.service_writers),
             "hardware": await self.nabio.gestalt(),
         }
-        if proc.stdout:
-            results = proc.stdout.readlines()
-            uptime = int(results[0].strip())
-            response["uptime"] = uptime
+
+        try:
+            result = subprocess.run(
+                ["ps", "-o", "etimes=", "-p", str(os.getpid())],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                response["uptime"] = int(result.stdout.strip())
+            elif result.returncode != 0 and result.stderr.strip():
+                logging.debug(
+                    "Unable to read process uptime: %s",
+                    result.stderr.strip(),
+                )
+        except (subprocess.SubprocessError, ValueError) as err:
+            logging.debug("Unable to compute uptime in gestalt: %s", err)
+
         self.write_response_packet(packet, response, writer)
 
     async def process_config_update_packet(
@@ -1098,21 +1110,21 @@ class Nabd:
                 event_type, {"type": "asr_event", "nlu": response, "time": now}
             )
 
-    async def _shutdown(self, doReboot):
+    async def _shutdown(self, do_reboot):
         await self.stop_idle_worker()
         Nabd.leds_boot(self.nabio, 0)
         await self.nabio.move_ears(
             Nabd.SLEEP_EAR_POSITION, Nabd.SLEEP_EAR_POSITION
         )
-        if doReboot:
+        if do_reboot:
             await self._do_system_command("/sbin/reboot")
         else:
             await self._do_system_command("/sbin/halt")
 
-    async def _do_system_command(self, sytemCommandStr):
-        logging.info(f"Initiating system command: {sytemCommandStr}")
+    async def _do_system_command(self, system_command_str):
+        logging.info(f"Initiating system command: {system_command_str}")
         if not _PYTEST:
-            os.system(sytemCommandStr)
+            os.system(system_command_str)
 
     def ears_callback(self, ear):
         if self.interactive_service_writer:
