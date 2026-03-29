@@ -27,7 +27,7 @@ allowed_hosts_env = os.getenv("DJANGO_ALLOWED_HOSTS", "")
 if allowed_hosts_env:
     ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(",")]
 else:
-    ALLOWED_HOSTS = ["nabaztag.local"]
+    ALLOWED_HOSTS = ["*"]
 
 # sécurité en prod
 if not DEBUG and not ALLOWED_HOSTS:
