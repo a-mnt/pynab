@@ -1,225 +1,255 @@
 {% extends 'nabweb/_base.html' %}
 {% load i18n %}
 {% load duration_filter %}
-{% block subtitle %}{% trans "System information" %}{% endblock %}
+
+{% block subtitle %}{% trans "Système" %}{% endblock %}
+
 {% block content %}
-  <div class="row justify-content-center">
-    <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
-      <div class="card">
-        <div class="card-header">
-          {% if os.variant == "Raspberry Pi" %}
-          <h5 class="card-title"><a class="help-link" href='https://www.raspberrypi.com/software/operating-systems/#raspberry-pi-os' target='_blank' rel='noopener noreferrer'>{% blocktrans with variant=os.variant %}{{ variant }} OS{% endblocktrans %}</a></h5>
-          {% elif os.variant == "DietPi" %}
-          <h5 class="card-title"><a class="help-link" href=https://dietpi.com target='_blank' rel='noopener noreferrer'>{% blocktrans with variant=os.variant %}{{ variant }} OS{% endblocktrans %}</a></h5>
-          {% else %}
-          <h5 class="card-title">{% blocktrans with variant=os.variant %}{{ variant }} OS{% endblocktrans %}</h5>
-          {% endif %}
-        </div>
-        <div class="card-body">
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "Version" %}</dt>
-            <dd class="col-sm-8">{{ os.version }}</dd>
-            <dt class="col-sm-4">{% trans "Hostname" %}</dt>
-            <dd class="col-sm-8">{{ os.hostname }}</dd>
-            <dt class="col-sm-4">{% trans "IP address" %}</dt>
-            <dd class="col-sm-8">{{ os.address }}</dd>
+  <section class="nab-dashboard">
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Système" %}</div>
+      <h1 class="nab-page-title">{% trans "Système" %}</h1>
+      <p class="nab-page-intro">
+        {% trans "Réseau, versions, maintenance et opérations système." %}
+      </p>
+    </div>
+
+    <div class="row">
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Réseau" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Informations réseau et disponibilité du système." %}
+            </p>
+          </div>
+
+          <div class="nab-status-list">
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Hostname" %}</span>
+              <span class="nab-status-value">{{ os.hostname }}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Adresse IP" %}</span>
+              <span class="nab-status-value">{{ os.address }}</span>
+            </div>
+
             {% if os.network %}
-            {% if os.variant == "Raspberry Pi" %}
-            <dt class="col-sm-4"><a class="help-link" href='https://www.raspberrypi.com/documentation/computers/configuration.html#setting-up-a-headless-raspberry-pi' target='_blank' rel='noopener noreferrer'>{% trans "Wireless network" %}</a></dt>
-            {% else %}
-            <dt class="col-sm-4">{% trans "Wireless network" %}</dt>
+              <div class="nab-status-item">
+                <span class="nab-status-label">{% trans "Réseau Wi-Fi" %}</span>
+                <span class="nab-status-value">{{ os.network }}</span>
+              </div>
             {% endif %}
-            <dd class="col-sm-8">{{ os.network }}</dd>
-            {% endif %}
-            <dt class="col-sm-4">{% trans "Uptime" %}</dt>
-            <dd class="col-sm-8">{{ os.uptime|duration }}</dd>
-            {% if os.variant == "Raspberry Pi" %}
-            <dt class="col-sm-4"><a class="help-link" href='https://www.raspberrypi.com/documentation/computers/remote-access.html#ssh' target='_blank' rel='noopener noreferrer'>{% trans "SSH (Secure shell)" %}</a></dt>
-            {% else %}
-            <dt class="col-sm-4">{% trans "SSH (Secure shell)" %}</dt>
-            {% endif %}
-            <dd class="col-sm-8">{% if os.ssh == "sshwarn" %}<span class="text-danger">{% trans "Enabled with default password" %}</span>{% else %}{% if os.ssh == "active" %}{% trans "Enabled" %}{% else %}{% trans "Disabled" %}{% endif %}{% endif %}</dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "Maintenance"%}</dt>
-            <dd class="col-sm-8">
-                <button id="button-reboot" data-toggle="modal" data-target="#confirm-reboot" data-shutdown-url="{% url 'nabweb.shutdown' mode='reboot' %}" class="btn btn-warning">{% trans "Reboot"%}<span class="spinner d-none"> <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span></button>
-                <button id="button-shutdown" data-toggle="modal" data-target="#confirm-shutdown" data-shutdown-url="{% url 'nabweb.shutdown' mode='shutdown' %}" class="btn btn-danger">{% trans "Shutdown"%}<span class="spinner d-none"> <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span></button>
-            </dd>
-          </dl>
-          <dl class="row" id="rebootMessageRow" style="display:none">
-            <dt class="col-sm-4"></dt>
-            <dd class="col-sm-8">
-	    <code>{% trans "<b>Reboot is in progress!</b>"%}</code>
-            </dd>
-          </dl>
-          <dl class="row" id="shutdownMessageRow" style="display:none">
-            <dt class="col-sm-4"></dt>
-            <dd class="col-sm-8">
-	    <code>{% trans "<b>Shutdown is in progress!</b>"%}<BR>{% trans "Please wait at least 10 seconds before unplugging the power cable."%}</code>
-            </dd>
-          </dl>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="row justify-content-center">
-    <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
-      <div class="card">
-        <div class="card-header">
-          <h5 class="card-title">{% trans "Nabd daemon" %}</h5>
-        </div>
-        <div class="card-body">
-          {% if gestalt.status == "error" %}
-          <div class="alert alert-danger" role="alert">
-            {{ gestalt.message }}
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Uptime" %}</span>
+              <span class="nab-status-value">{{ os.uptime|duration }}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "SSH" %}</span>
+              <span class="nab-status-value">
+                {% if os.ssh == "sshwarn" %}
+                  {% trans "Activé avec mot de passe par défaut" %}
+                {% elif os.ssh == "active" %}
+                  {% trans "Activé" %}
+                {% else %}
+                  {% trans "Désactivé" %}
+                {% endif %}
+              </span>
+            </div>
           </div>
-          {% else %}
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "State" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.state }}</dd>
-            <dt class="col-sm-4">{% trans "Uptime" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.uptime|duration }}</dd>
-            <dt class="col-sm-4">{% trans "Clients (including website)" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.connections }}</dd>
-          </dl>
-          {% endif %}
         </div>
       </div>
-    </div>
-  </div>
-  <div class="row justify-content-center">
-    <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
-      <div class="card">
-        <div class="card-header">
-          <h5 class="card-title">{% trans "Hardware" %}</h5>
-        </div>
-        <div class="card-body">
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "Computer" %}</dt>
-            <dd class="col-sm-8">{{ pi.model }}</dd>
-          </dl>
-          {% if gestalt.status == "error" %}
-          <div class="alert alert-danger" role="alert">
-            {{ gestalt.message }}
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Informations version" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Version de l’OS et informations matérielles principales." %}
+            </p>
           </div>
-          {% else %}
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "Hat card" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.hardware.model }}</dd>
-            <dt class="col-sm-4">{% trans "Sound card" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.hardware.sound_card }}</dd>
-            <dt class="col-sm-4">{% trans "Sound input" %}</dt>
-            <dd class="col-sm-8">{% if gestalt.result.hardware.sound_input %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</dd>
-            <dt class="col-sm-4">{% trans "Left ear" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.hardware.left_ear_status }}</dd>
-            <dt class="col-sm-4">{% trans "Right ear" %}</dt>
-            <dd class="col-sm-8">{{ gestalt.result.hardware.right_ear_status }}</dd>
-            <dt class="col-sm-4">{% trans "RFID or NFC" %}</dt>
-            <dd class="col-sm-8">{% if gestalt.result.hardware.rfid %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</dd>
-          </dl>
-          {% endif %}
-          <dl class="row">
-            <dt class="col-sm-4">{% trans "Hardware test"%}</dt>
-            <dd class="col-sm-8">
-                <button data-test-url="{% url 'nabweb.test' test='leds' %}" class="btn btn-outline-secondary btn-sm hardware-test-button">{% trans "LEDs"%}<span class="spinner d-none"> <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span></button>
-                <button data-test-url="{% url 'nabweb.test' test='ears' %}" class="btn btn-outline-secondary btn-sm hardware-test-button">{% trans "Ears"%}<span class="spinner d-none"> <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span></span></button></dd>
-          </dl>
+
+          <div class="nab-status-list">
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Système" %}</span>
+              <span class="nab-status-value">{{ os.variant }}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Version OS" %}</span>
+              <span class="nab-status-value">{{ os.version }}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Ordinateur" %}</span>
+              <span class="nab-status-value">{{ pi.model }}</span>
+            </div>
+
+            {% if gestalt.status != "error" %}
+              <div class="nab-status-item">
+                <span class="nab-status-label">{% trans "Carte" %}</span>
+                <span class="nab-status-value">{{ gestalt.result.hardware.model }}</span>
+              </div>
+
+              <div class="nab-status-item">
+                <span class="nab-status-label">{% trans "Carte son" %}</span>
+                <span class="nab-status-value">{{ gestalt.result.hardware.sound_card }}</span>
+              </div>
+            {% else %}
+              <div class="nab-alert-item">
+                <span class="nab-alert-badge">{% trans "Info" %}</span>
+                <span class="nab-alert-text">{{ gestalt.message }}</span>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Mise à jour" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Accès direct à la page de mise à jour et vérification des versions." %}
+            </p>
+          </div>
+
+          <div class="nab-status-list">
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Logiciel" %}</span>
+              <span class="nab-status-value">{% trans "Consulter la page Upgrade" %}</span>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <a class="btn btn-primary nab-action-btn" href="/upgrade/">
+              {% trans "Ouvrir la mise à jour" %}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Logs" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Journaux utiles pour le diagnostic et la maintenance." %}
+            </p>
+          </div>
+
+          <div class="nab-alert-list">
+            <div class="nab-alert-item">
+              <span class="nab-alert-badge">{% trans "Logs" %}</span>
+              <span class="nab-alert-text">
+                {% trans "Aucun visualiseur dédié n’est encore présent dans l’interface web. Utilisez SSH pour consulter les journaux système et les logs de mise à jour." %}
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <code>/tmp/pynab-upgrade-stdout.log</code><br>
+            <code>/tmp/pynab-upgrade-stderr.log</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Redémarrage" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Redémarrer proprement le système Linux du Nabaztag." %}
+            </p>
+          </div>
+
+          <div class="nab-alert-list">
+            <div class="nab-alert-item">
+              <span class="nab-alert-badge">{% trans "Action" %}</span>
+              <span class="nab-alert-text">
+                {% trans "Le redémarrage peut prendre quelques instants." %}
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <button
+              type="button"
+              class="btn btn-outline-primary nab-action-btn js-system-action"
+              data-url="{% url 'nabweb.shutdown' mode='reboot' %}"
+              data-loading="{% trans 'Redémarrage en cours…' %}"
+            >
+              {% trans "Redémarrer" %}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Arrêt" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Éteindre proprement le système avant de débrancher l’alimentation." %}
+            </p>
+          </div>
+
+          <div class="nab-alert-list">
+            <div class="nab-alert-item">
+              <span class="nab-alert-badge">{% trans "Attention" %}</span>
+              <span class="nab-alert-text">
+                {% trans "Attendez au moins 10 secondes avant de couper l’alimentation." %}
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <button
+              type="button"
+              class="btn btn-outline-secondary nab-action-btn js-system-action"
+              data-url="{% url 'nabweb.shutdown' mode='shutdown' %}"
+              data-loading="{% trans 'Arrêt en cours…' %}"
+            >
+              {% trans "Arrêter" %}
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-  <div class="modal fade" id="confirm-reboot" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">{% trans "Reboot" %}</h5>
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-            <span aria-hidden="true">&times;</span>
-          </button>
-        </div>
-        <div class="modal-body">
-		{% trans "You are about to <b>reboot</b> the Raspberry Pi Linux system." %}<BR>{% trans "Do you want to proceed?" %}
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">{% trans "Cancel" %}</button>
-          <button type="button" id="button-reboot-confirm" class="btn btn-primary os-shutdown-button" data-dismiss="modal">{% trans "Reboot" %}</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="modal fade" id="confirm-shutdown" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">{% trans "Shutdown" %}</h5>
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-            <span aria-hidden="true">&times;</span>
-          </button>
-        </div>
-        <div class="modal-body">
-		{% trans "You are about to <b>shutdown</b> the Raspberry Pi Linux system." %}<BR>{% trans "Do you want to proceed?" %}
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">{% trans "Cancel" %}</button>
-          <button type="button" id="button-shutdown-confirm" class="btn btn-primary os-shutdown-button" data-dismiss="modal">{% trans "Shutdown" %}</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  </section>
+
   <script type="text/javascript">
     $(function() {
-      $(".hardware-test-button").each(function(i, btn) {
-        $(btn).on("click", function() {
-            $(btn).addClass("disabled");
-            $(btn).find(".spinner").removeClass("d-none");
-            $.ajax({
-              url: $(btn).data("test-url"),
-              beforeSend: function (xhr, settings) {
-                xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
-              },
-              dataType: 'json',
-              type: "POST",
-              success: function (data) {
-                $(btn).removeClass("disabled");
-                $(btn).find(".spinner").addClass("d-none");
-              },
-              error: function (data) {
-                $(btn).removeClass("disabled");
-                $(btn).find(".spinner").addClass("d-none");
-              }
+      $(".js-system-action").on("click", function() {
+        var button = $(this);
+        var url = button.data("url");
+        var loadingText = button.data("loading");
+        var originalText = button.text();
+
+        button.prop("disabled", true).text(loadingText);
+
+        $.ajax({
+          url: url,
+          method: "POST",
+          headers: {
+            "X-CSRFToken": "{{ csrf_token }}"
+          },
+          success: function() {
+            $.bootstrapGrowl(loadingText, {
+              type: "info",
+              delay: 4000
             });
-        });
-      });
-      $(".os-shutdown-button").each(function(i, btn) {
-        $(btn).on("click", function() {
-            if ($(btn).attr("id") == 'button-reboot-confirm') {
-              var origButton = $("#button-reboot")
-              $("#rebootMessageRow").show();
-              $("#shutdownMessageRow").hide();
-            } else {
-              var origButton = $("#button-shutdown")
-              $("#shutdownMessageRow").show();
-              $("#rebootMessageRow").hide();
-            }
-            origButton.addClass("disabled");
-            origButton.find(".spinner").removeClass("d-none");
-            $.ajax({
-              url: origButton.data("shutdown-url"),
-              beforeSend: function (xhr, settings) {
-                xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
-              },
-              dataType: 'json',
-              type: "POST",
-              success: function (data) {
-                origButton.removeClass("disabled");
-                origButton.find(".spinner").addClass("d-none");
-              },
-              error: function (data) {
-                origButton.removeClass("disabled");
-                origButton.find(".spinner").addClass("d-none");
-              }
+          },
+          error: function() {
+            $.bootstrapGrowl("{% trans 'Une erreur est survenue.' %}", {
+              type: "danger",
+              delay: 4000
             });
+            button.prop("disabled", false).text(originalText);
+          }
         });
       });
     });

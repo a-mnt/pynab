@@ -1,0 +1,114 @@
+{% extends 'nabweb/_base.html' %}
+{% load i18n %}
+
+{% block subtitle %}{% trans "Paramètres" %}{% endblock %}
+
+{% block content %}
+  <section class="nab-dashboard">
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Paramètres" %}</div>
+      <h1 class="nab-page-title">{% trans "Paramètres" %}</h1>
+      <p class="nab-page-intro">
+        {% trans "Personnalisation, préférences utilisateur et accès rapides aux réglages." %}
+      </p>
+    </div>
+
+    <div class="row">
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Préférences utilisateur" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Centraliser ici les réglages qui concernent votre usage quotidien." %}
+            </p>
+          </div>
+
+          <div class="nab-quick-grid">
+            <a class="nab-quick-card" href="/services/">
+              <span class="nab-quick-card-title">{% trans "Services" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les services actifs, les notifications, l’agenda et les automatisations." %}
+              </span>
+            </a>
+
+            <a class="nab-quick-card" href="/rfid/">
+              <span class="nab-quick-card-title">{% trans "RFID / NFC" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Gérer les tags, les actions associées et leur personnalisation." %}
+              </span>
+            </a>
+
+            <a class="nab-quick-card" href="/help/">
+              <span class="nab-quick-card-title">{% trans "Aide" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Accéder à la documentation et aux informations utiles." %}
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-6 mb-4">
+        <div class="nab-card h-100">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Personnalisation" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Organisation simple des réglages liés au comportement du Nabaztag." %}
+            </p>
+          </div>
+
+          <div class="nab-status-list">
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Langue / voix" %}</span>
+              <span class="nab-status-value">{% trans "À regrouper ici dans une prochaine étape" %}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Notifications" %}</span>
+              <span class="nab-status-value">{% trans "Depuis les services concernés" %}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Agenda" %}</span>
+              <span class="nab-status-value">{% trans "Depuis les services concernés" %}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Comportement RFID" %}</span>
+              <span class="nab-status-value">{% trans "Depuis la page RFID / NFC" %}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 mb-4">
+        <div class="nab-card">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Accès rapides" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Les pages les plus utiles pour les préférences et la personnalisation." %}
+            </p>
+          </div>
+
+          <div class="nab-action-grid">
+            <a class="btn btn-primary nab-action-btn" href="/services/">
+              {% trans "Configurer les services" %}
+            </a>
+
+            <a class="btn btn-outline-primary nab-action-btn" href="/rfid/">
+              {% trans "Configurer RFID" %}
+            </a>
+
+            <a class="btn btn-outline-primary nab-action-btn" href="/system-info/">
+              {% trans "Voir le système" %}
+            </a>
+
+            <a class="btn btn-outline-primary nab-action-btn" href="/help/">
+              {% trans "Ouvrir l’aide" %}
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

@@ -1,18 +1,4 @@
-"""nabweb URL Configuration
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/2.1/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
+"""nabweb URL Configuration"""
 
 from typing import List, Union
 
@@ -38,25 +24,46 @@ from .views import (
 )
 
 urlpatterns: List[Union[URLResolver, URLPattern]] = [
-    path("", NabWebView.as_view()),
-    path("services/", NabWebServicesView.as_view()),
-    path("rfid/", NabWebRfidView.as_view()),
+
+    # --- Accueil ---
+    path("", NabWebView.as_view(), name="nabweb.home"),
+
+    # --- Services ---
+    path("services/", NabWebServicesView.as_view(), name="nabweb.services"),
+
+    # --- Paramètres (NOUVEAU) ---
+    path(
+        "settings/",
+        TemplateView.as_view(template_name="nabweb/settings/index.html"),
+        name="nabweb.settings",
+    ),
+
+    # --- RFID ---
+    path("rfid/", NabWebRfidView.as_view(), name="nabweb.rfid"),
     path("rfid/read", NabWebRfidReadView.as_view(), name="rfid.read"),
     path("rfid/write", NabWebRfidWriteView.as_view(), name="rfid.write"),
+
+    # --- Système ---
     path(
-        "system-info/test/<test>",
+        "system-info/test/<str:test>",
         NabWebHardwareTestView.as_view(),
         name="nabweb.test",
     ),
-    path("system-info/", NabWebSytemInfoView.as_view()),
     path(
-        "system-info/shutdown/<mode>",
+        "system-info/",
+        NabWebSytemInfoView.as_view(),
+        name="nabweb.system",
+    ),
+    path(
+        "system-info/shutdown/<str:mode>",
         NabWebShutdownView.as_view(),
         name="nabweb.shutdown",
     ),
-    path("upgrade/", NabWebUpgradeView.as_view()),
+
+    # --- Upgrade ---
+    path("upgrade/", NabWebUpgradeView.as_view(), name="nabweb.upgrade"),
     path(
-        "upgrade/info/<repository>",
+        "upgrade/info/<str:repository>",
         NabWebUpgradeRepositoryInfoView.as_view(),
         name="nabweb.upgrade.info",
     ),
@@ -75,6 +82,8 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
         NabWebUpgradeCheckNowView.as_view(),
         name="nabweb.upgrade.checknow",
     ),
+
+    # --- Help ---
     path(
         "help/",
         TemplateView.as_view(template_name="nabweb/help.html"),
@@ -82,7 +91,9 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
     ),
     path(
         "help/weather",
-        TemplateView.as_view(template_name="nabweatherd/animations_help.html"),
+        TemplateView.as_view(
+            template_name="nabweatherd/animations_help.html"
+        ),
         name="nabweatherd.help.animations",
     ),
     path(
@@ -94,11 +105,10 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
     ),
 ]
 
-# Static files are served by nginx in the complete
-# installation so this is only useful when nginx is not used
+# Static files (dev uniquement)
 urlpatterns += staticfiles_urlpatterns()
 
-# Service URLs added automatically
+# Services dynamiques (très important → ne pas casser)
 for config in apps.get_app_configs():
     if hasattr(config.module, "NABAZTAG_SERVICE_PRIORITY"):
         urlpatterns.append(

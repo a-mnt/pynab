@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=3">
+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=4">
 
     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
 
@@ -62,7 +62,7 @@
         <span class="nab-bottom-label">{% trans "Système" %}</span>
       </a>
 
-      <a class="nab-bottom-link{% if request.path == '/settings/' %} active{% endif %}" href="/services/">
+      <a class="nab-bottom-link{% if request.path == '/settings/' %} active{% endif %}" href="/settings/">
         <span class="nab-bottom-icon">☰</span>
         <span class="nab-bottom-label">{% trans "Paramètres" %}</span>
       </a>
@@ -90,37 +90,5 @@
         </div>
       </div>
     </div>
-
-    <script type="text/javascript">
-      $(function() {
-        var upgradeBadge = $("a.upgrade-link span.badge");
-
-        if (upgradeBadge.length) {
-          $.ajax({
-            url: "{% url 'nabweb.upgrade.status' %}",
-            contentType: "application/json",
-            method: "GET",
-            success: function(data) {
-              if (data.status === "ok") {
-                if (data.commits_count > 0) {
-                  upgradeBadge.text(data.commits_count);
-                } else {
-                  upgradeBadge.text("");
-                }
-              } else {
-                upgradeBadge.text("!");
-                upgradeBadge.removeClass("badge-info").addClass("badge-danger");
-                upgradeBadge.attr("title", data.message);
-              }
-            },
-            error: function() {
-              upgradeBadge.text("!");
-              upgradeBadge.removeClass("badge-info").addClass("badge-danger");
-              upgradeBadge.attr("title", "{% trans 'Unknown server error' %}");
-            }
-          });
-        }
-      });
-    </script>
   </body>
 </html>

@@ -1,24 +1,109 @@
 {% extends 'nabweb/_base.html' %}
 {% load i18n %}
+
 {% block subtitle %}{% trans "Services" %}{% endblock %}
+
 {% block content %}
-  {% for service in services %}
-    {% if forloop.counter0|divisibleby:2 %}
-    <div class="row">
-    {% endif %}
-      <div class="settings col-md-6 mb-3" data-url="/{{ service }}/settings"></div>
-    {% if not forloop.counter0|divisibleby:2 or forloop.last %}
+  <section class="nab-dashboard">
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Services" %}</div>
+      <h1 class="nab-page-title">{% trans "Services" %}</h1>
+      <p class="nab-page-intro">
+        {% trans "Choisissez un service pour accéder à sa configuration." %}
+      </p>
     </div>
-    {% endif %}
-  {% endfor %}
-  <script type="text/javascript">
-    $(function() {
-      $("div.settings").each(function(index, element) {
-        var url = $(element).data('url');
-        $.get(url, function(data) {
-          $(element).html(data);
-        });
-      });
-    });
-  </script>
+
+    <div class="nab-card mb-4">
+      <div class="nab-section-head">
+        <h2 class="nab-section-title">{% trans "Liste des services" %}</h2>
+        <p class="nab-section-text">
+          {% trans "Chaque carte mène directement vers la configuration correspondante." %}
+        </p>
+      </div>
+
+      <div class="nab-quick-grid">
+        <a class="nab-quick-card" href="/rfid/">
+          <span class="nab-quick-card-title">{% trans "RFID" %}</span>
+          <span class="nab-quick-card-text">
+            {% trans "Configurer la lecture et l’écriture des tags RFID." %}
+          </span>
+        </a>
+
+        {% for service in services %}
+          <a class="nab-quick-card" href="/{{ service }}/settings">
+            {% if service == "nabradio" %}
+              <span class="nab-quick-card-title">{% trans "Radio" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Gérer les webradios et leur lancement." %}
+              </span>
+
+            {% elif service == "nabmastodond" %}
+              <span class="nab-quick-card-title">{% trans "Notifications" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les notifications et services connectés." %}
+              </span>
+
+            {% elif service == "nabclockd" %}
+              <span class="nab-quick-card-title">{% trans "Agenda" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les événements planifiés et routines." %}
+              </span>
+
+            {% elif service == "nabairqualityd" %}
+              <span class="nab-quick-card-title">{% trans "Qualité de l’air" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer le service d’information sur la qualité de l’air." %}
+              </span>
+
+            {% elif service == "nabweatherd" %}
+              <span class="nab-quick-card-title">{% trans "Météo" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les prévisions et animations météo." %}
+              </span>
+
+            {% elif service == "nab8balld" %}
+              <span class="nab-quick-card-title">{% trans "Magic 8 Ball" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer le service de réponses aléatoires." %}
+              </span>
+
+            {% elif service == "nabsurprised" %}
+              <span class="nab-quick-card-title">{% trans "Surprises" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les contenus et déclenchements surprise." %}
+              </span>
+
+            {% elif service == "nabbookd" %}
+              <span class="nab-quick-card-title">{% trans "Livres audio" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les contenus audio et leur lecture." %}
+              </span>
+
+            {% elif service == "nabtaichid" %}
+              <span class="nab-quick-card-title">{% trans "Oreilles" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les mouvements automatiques des oreilles." %}
+              </span>
+
+            {% elif service == "nabiftttd" %}
+              <span class="nab-quick-card-title">{% trans "Automatisations" %}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Configurer les déclencheurs et actions connectées." %}
+              </span>
+
+            {% else %}
+              <span class="nab-quick-card-title">{{ service }}</span>
+              <span class="nab-quick-card-text">
+                {% trans "Ouvrir la configuration de ce service." %}
+              </span>
+            {% endif %}
+          </a>
+        {% empty %}
+          <div class="nab-empty-state">
+            {% trans "Aucun service disponible." %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
 {% endblock %}
