@@ -1,4 +1,21 @@
-/* help links */
+/* --------------------------------------------------
+   Base
+-------------------------------------------------- */
+
+html,
+body {
+  min-height: 100%;
+}
+
+body.nab-body {
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+/* --------------------------------------------------
+   Generic helpers
+-------------------------------------------------- */
+
 a.help-link {
   color: inherit;
   text-decoration: inherit;
@@ -17,7 +34,381 @@ a.help-link:hover {
   background-color: #007bff;
 }
 
-/* select elements */
-select {
+select,
+.nab-select {
   width: 100%;
+}
+
+/* --------------------------------------------------
+   Top bar / navigation
+-------------------------------------------------- */
+
+.nab-topbar {
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+}
+
+.nab-navbar {
+  padding: 0.75rem 1rem;
+}
+
+.nab-brand-mark {
+  width: 2.1rem;
+  height: 2.1rem;
+  min-width: 2.1rem;
+  border-radius: 999px;
+  background: #6c63ff;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-right: 0.75rem;
+}
+
+.nab-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+
+.nab-brand-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.nab-brand-subtitle {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.nab-main-nav .nav-link {
+  font-weight: 600;
+  color: #475467 !important;
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem !important;
+  margin: 0.15rem 0.2rem;
+}
+
+.nab-main-nav .nav-link:hover,
+.nab-main-nav .nav-link:focus {
+  background: #eef2ff;
+  color: #3b4cca !important;
+}
+
+.nab-main-nav .nav-link.active {
+  background: #e0e7ff;
+  color: #312e81 !important;
+}
+
+.nab-topbar-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.nab-github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+
+.nab-github-link:hover {
+  background: #e5e7eb;
+  text-decoration: none;
+}
+
+.nab-navbar-toggler {
+  border: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.75rem;
+  background: #f3f4f6;
+}
+
+/* --------------------------------------------------
+   Layout
+-------------------------------------------------- */
+
+.nab-page {
+  padding: 1rem 0 2rem;
+}
+
+.nab-container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+/* --------------------------------------------------
+   Panels / cards
+-------------------------------------------------- */
+
+.nab-panel,
+.nab-info-card,
+.nab-loading-card,
+.nab-service-slot > .card,
+.nab-service-slot > .alert,
+.nab-modal .modal-content {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  box-shadow: 0 10px 30px rgba(17, 24, 39, 0.05);
+}
+
+.nab-panel {
+  padding: 1.25rem;
+}
+
+.nab-panel-hero {
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
+}
+
+.nab-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nab-section-title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.nab-section-subtitle {
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+.nab-page-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  color: #111827;
+}
+
+.nab-page-lead {
+  font-size: 1.05rem;
+  color: #4b5563;
+}
+
+.nab-hero-kicker {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nab-hero-text {
+  color: #4b5563;
+}
+
+/* --------------------------------------------------
+   Buttons
+-------------------------------------------------- */
+
+.nab-btn-main,
+.nab-btn-secondary,
+.btn {
+  min-height: 44px;
+  border-radius: 0.8rem;
+  font-weight: 600;
+}
+
+.nab-quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* --------------------------------------------------
+   Quick links cards
+-------------------------------------------------- */
+
+.nab-link-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.nab-link-card {
+  display: block;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.9rem;
+  background: #fafafa;
+  transition: all 0.15s ease;
+}
+
+.nab-link-card:hover {
+  text-decoration: none;
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.nab-link-card-title {
+  display: block;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 0.15rem;
+}
+
+.nab-link-card-text {
+  display: block;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+/* --------------------------------------------------
+   Info cards
+-------------------------------------------------- */
+
+.nab-info-card {
+  padding: 1rem;
+}
+
+.nab-info-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+  color: #111827;
+}
+
+/* --------------------------------------------------
+   Dynamic service slots
+-------------------------------------------------- */
+
+.nab-service-slot {
+  min-height: 120px;
+}
+
+.nab-loading-card {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  padding: 1rem;
+  text-align: center;
+}
+
+/* --------------------------------------------------
+   Forms
+-------------------------------------------------- */
+
+.form-control,
+input[type="text"],
+input[type="number"],
+input[type="time"],
+input[type="date"],
+textarea,
+select {
+  border-radius: 0.8rem !important;
+  min-height: 44px;
+  border: 1px solid #d0d5dd;
+}
+
+label {
+  font-weight: 600;
+  color: #374151;
+}
+
+/* --------------------------------------------------
+   Bootstrap cards injected by services
+-------------------------------------------------- */
+
+.card {
+  border-radius: 1rem;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 10px 30px rgba(17, 24, 39, 0.05);
+}
+
+.card-header,
+.card-footer {
+  background: #ffffff;
+  border-color: #eef2f7;
+}
+
+.card-header h5,
+.card-header .card-title {
+  margin-bottom: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* --------------------------------------------------
+   Modal
+-------------------------------------------------- */
+
+.nab-modal {
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------
+   Responsive
+-------------------------------------------------- */
+
+@media (max-width: 991.98px) {
+  .nab-main-nav {
+    margin-top: 0.75rem;
+  }
+
+  .nab-topbar-actions {
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .nab-page-title {
+    font-size: 1.65rem;
+  }
+
+  .nab-panel {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .nab-container {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .nab-navbar {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .nab-page-title {
+    font-size: 1.45rem;
+  }
+
+  .nab-page-lead {
+    font-size: 1rem;
+  }
+
+  .nab-quick-links {
+    flex-direction: column;
+  }
+
+  .nab-btn-main,
+  .nab-btn-secondary {
+    width: 100%;
+  }
 }
