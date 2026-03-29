@@ -1,199 +1,119 @@
 {% extends 'nabweb/_base.html' %}
 {% load i18n %}
 
-{% block subtitle %}{% trans "Home" %}{% endblock %}
+{% block subtitle %}{% trans "Accueil" %}{% endblock %}
 
 {% block content %}
-  <section class="nab-hero-section">
+  <section class="nab-dashboard">
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Accueil" %}</div>
+      <h1 class="nab-page-title">{% trans "Tableau de bord" %}</h1>
+      <p class="nab-page-intro">
+        {% trans "Retrouvez ici l’essentiel de votre Nabaztag." %}
+      </p>
+    </div>
+
     <div class="row">
-      <div class="col-12 col-xl-8 mb-4">
-        <div class="nab-card nab-hero-card h-100">
-          <div class="nab-kicker">{% trans "Dashboard" %}</div>
-          <h1 class="nab-page-title">{% trans "Configuration du Nabaztag" %}</h1>
-          <p class="nab-page-intro">
-            {% trans "Vous êtes actuellement en connexion avec votre lapin." %}
-          </p>
-
-          <div class="nab-action-row">
-            <a class="btn btn-primary nab-btn-primary" href="/services/">
-              {% trans "Configure services" %}
-            </a>
-            <a class="btn btn-outline-primary nab-btn-secondary" href="/system-info/">
-              {% trans "View system information" %}
-            </a>
-          </div>
-
-          <div class="nab-hero-description">
-            <p>
-              {% trans "Use this interface to configure the main features of your rabbit, manage NFC tags, check system status and install updates." %}
-            </p>
-            <p class="mb-0">
-              {% trans "Vous pouvez aussi déclencher certains services à la voix en maintenant appuyé le bouton sur la tête du lapin." %}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 col-xl-4 mb-4">
+      <div class="col-12 col-lg-6 mb-4">
         <div class="nab-card h-100">
           <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Quick access" %}</h2>
-            <p class="nab-section-text">{% trans "Main sections of the web interface" %}</p>
-          </div>
-
-          <div class="nab-quick-grid">
-            <a class="nab-quick-card" href="/services/">
-              <span class="nab-quick-card-title">{% trans "Services" %}</span>
-              <span class="nab-quick-card-text">{% trans "Configure available applications and modules." %}</span>
-            </a>
-
-            <a class="nab-quick-card" href="/rfid/">
-              <span class="nab-quick-card-title">{% trans "NFC" %}</span>
-              <span class="nab-quick-card-text">{% trans "Associate actions with tags." %}</span>
-            </a>
-
-            <a class="nab-quick-card" href="/system-info/">
-              <span class="nab-quick-card-title">{% trans "Information système" %}</span>
-              <span class="nab-quick-card-text">{% trans "Check network, uptime and hardware status." %}</span>
-            </a>
-
-            <a class="nab-quick-card" href="/upgrade/">
-              <span class="nab-quick-card-title">{% trans "Mise à jour" %}</span>
-              <span class="nab-quick-card-text">{% trans "Check software versions and launch updates." %}</span>
-            </a>
-
-            <a class="nab-quick-card" href="/help/" target="_blank" rel="noopener noreferrer">
-              <span class="nab-quick-card-title">{% trans "Aide" %}</span>
-              <span class="nab-quick-card-text">{% trans "Open the documentation and support page." %}</span>
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="mb-4">
-    <div class="row">
-      <div class="col-12 col-xl-5 mb-4">
-        <div class="nab-card h-100" id="language-settings">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Langue" %}</h2>
+            <h2 class="nab-section-title">{% trans "État du Nabaztag" %}</h2>
             <p class="nab-section-text">
-              {% trans "La langue est utilisée par les services avec des sons enregistrés." %}
+              {% trans "Vue rapide de l’état général de votre lapin." %}
             </p>
           </div>
 
-          <form method="post" action="/" class="mt-4">
-            {% csrf_token %}
-
-            <div class="form-group mb-4">
-              <label for="localeSel">{% trans "Langue" %}</label>
-              <select name="locale" id="localeSel" class="form-control nab-select">
-                {% for locale, name, selected in locales %}
-                  <option value="{{ locale }}" {% if selected %}selected{% endif %}>{{ name }}</option>
-                {% endfor %}
-              </select>
+          <div class="nab-status-list">
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Connexion" %}</span>
+              <span class="nab-status-value nab-status-ok">{% trans "Connecté" %}</span>
             </div>
 
-            <div class="nab-form-actions">
-              <button type="reset" class="btn btn-outline-primary disabled reset-button">
-                {% trans "Reset" %}
-              </button>
-              <button type="submit" class="btn btn-primary disabled save-button">
-                {% trans "Save" %}
-              </button>
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Interface web" %}</span>
+              <span class="nab-status-value nab-status-ok">{% trans "Disponible" %}</span>
             </div>
-          </form>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Accès système" %}</span>
+              <span class="nab-status-value">{% trans "Consulter la page Système" %}</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="col-12 col-xl-7 mb-4">
+      <div class="col-12 col-lg-6 mb-4">
         <div class="nab-card h-100">
           <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "About" %}</h2>
+            <h2 class="nab-section-title">{% trans "Services actifs" %}</h2>
             <p class="nab-section-text">
-              {% trans "Useful links to go further with your rabbit." %}
+              {% trans "Liste rapide des modules disponibles sur votre Nabaztag." %}
             </p>
           </div>
 
-          <div class="row">
-            <div class="col-12 col-md-6 mb-3">
-              <div class="nab-mini-card h-100">
-                <h3 class="nab-mini-title">{% trans "Mastodon" %}</h3>
-                <p>{% trans "Connect your Nabaztag to Mastodon, where it may join fellow rabbits." %}</p>
-                <a class="btn btn-outline-primary btn-sm" href="https://joinmastodon.org" target="_blank" rel="noopener noreferrer">
-                  {% trans "Open Mastodon" %}
-                </a>
+          <div class="nab-service-list">
+            {% for service in services %}
+              <div class="nab-service-item">
+                <span class="nab-service-dot"></span>
+                <span class="nab-service-name">{{ service }}</span>
               </div>
-            </div>
+            {% empty %}
+              <div class="nab-empty-state">
+                {% trans "Aucun service détecté." %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
 
-            <div class="col-12 col-md-6 mb-3">
-              <div class="nab-mini-card h-100">
-                <h3 class="nab-mini-title">{% trans "NabBlockly" %}</h3>
-                <p>{% trans "Learn how to code with visual blocks for Nabaztag." %}</p>
-                <a class="btn btn-outline-primary btn-sm" href="/" onclick="javascript:event.target.port=8080" target="_blank" rel="noopener noreferrer">
-                  {% trans "Open NabBlockly" %}
-                </a>
-              </div>
-            </div>
+      <div class="col-12 mb-4">
+        <div class="nab-card">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Actions rapides" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Accès direct aux commandes principales." %}
+            </p>
+          </div>
 
-            <div class="col-12">
-              <div class="nab-mini-card h-100">
-                <h3 class="nab-mini-title">{% trans "GitHub repository" %}</h3>
-                <p>{% trans "Browse the source code, report issues or start hacking on new features." %}</p>
-                <a class="btn btn-outline-primary btn-sm" href="https://github.com/nabaztag2018/pynab" target="_blank" rel="noopener noreferrer">
-                  {% trans "Open GitHub" %}
-                </a>
-              </div>
+          <div class="nab-action-grid">
+            <a class="btn btn-primary nab-action-btn" href="/services/">
+              {% trans "Démarrer" %}
+            </a>
+
+            <a class="btn btn-outline-secondary nab-action-btn" href="/services/">
+              {% trans "Arrêter" %}
+            </a>
+
+            <a class="btn btn-outline-primary nab-action-btn" href="/system-info/">
+              {% trans "Redémarrer" %}
+            </a>
+
+            <a class="btn btn-outline-primary nab-action-btn" href="/upgrade/">
+              {% trans "Mise à jour" %}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 mb-4">
+        <div class="nab-card">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Alertes importantes" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Éléments nécessitant votre attention." %}
+            </p>
+          </div>
+
+          <div class="nab-alert-list">
+            <div class="nab-alert-item">
+              <span class="nab-alert-badge">{% trans "Info" %}</span>
+              <span class="nab-alert-text">
+                {% trans "Consultez la page Système pour les informations détaillées et la page Mise à jour pour les nouvelles versions." %}
+              </span>
             </div>
           </div>
         </div>
       </div>
     </div>
   </section>
-
-  <section class="mb-4">
-    <div class="nab-section-head mb-3">
-      <h2 class="nab-section-title">{% trans "Service settings" %}</h2>
-      <p class="nab-section-text">{% trans "These blocks are loaded dynamically from each service." %}</p>
-    </div>
-
-    <div class="row">
-      {% for service in services %}
-        <div class="col-12 col-lg-6 mb-3">
-          <div class="settings nab-service-slot" data-url="/{{ service }}/settings">
-            <div class="nab-loading-card">
-              <div class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></div>
-              <span>{% trans "Loading…" %}</span>
-            </div>
-          </div>
-        </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <script type="text/javascript">
-    $(function() {
-      var form = $("#language-settings form");
-      var saveBtn = form.find("button.save-button");
-      var resetBtn = form.find("button.reset-button");
-
-      form.find("select").on("change", function() {
-        saveBtn.removeClass("disabled");
-        resetBtn.removeClass("disabled");
-      });
-
-      $("div.settings").each(function(index, element) {
-        var url = $(element).data("url");
-
-        $.get(url, function(data) {
-          $(element).html(data);
-        }).fail(function() {
-          $(element).html(
-            '<div class="alert alert-warning mb-0" role="alert">{% trans "Unable to load this service settings panel." %}</div>'
-          );
-        });
-      });
-    });
-  </script>
 {% endblock %}
