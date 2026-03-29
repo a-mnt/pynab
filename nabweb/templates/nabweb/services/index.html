@@ -9,101 +9,215 @@
       <div class="nab-kicker">{% trans "Services" %}</div>
       <h1 class="nab-page-title">{% trans "Services" %}</h1>
       <p class="nab-page-intro">
-        {% trans "Choisissez un service pour accéder à sa configuration." %}
+        {% trans "Tous les services disponibles et leur configuration sont affichés ici." %}
       </p>
     </div>
 
-    <div class="nab-card mb-4">
-      <div class="nab-section-head">
-        <h2 class="nab-section-title">{% trans "Liste des services" %}</h2>
-        <p class="nab-section-text">
-          {% trans "Chaque carte mène directement vers la configuration correspondante." %}
-        </p>
-      </div>
-
-      <div class="nab-quick-grid">
-        <a class="nab-quick-card" href="/rfid/">
-          <span class="nab-quick-card-title">{% trans "RFID" %}</span>
-          <span class="nab-quick-card-text">
-            {% trans "Configurer la lecture et l’écriture des tags RFID." %}
-          </span>
-        </a>
-
-        {% for service in services %}
-          <a class="nab-quick-card" href="/{{ service }}/settings">
-            {% if service == "nabradio" %}
-              <span class="nab-quick-card-title">{% trans "Radio" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Gérer les webradios et leur lancement." %}
-              </span>
-
-            {% elif service == "nabmastodond" %}
-              <span class="nab-quick-card-title">{% trans "Notifications" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les notifications et services connectés." %}
-              </span>
-
-            {% elif service == "nabclockd" %}
-              <span class="nab-quick-card-title">{% trans "Agenda" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les événements planifiés et routines." %}
-              </span>
-
-            {% elif service == "nabairqualityd" %}
-              <span class="nab-quick-card-title">{% trans "Qualité de l’air" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer le service d’information sur la qualité de l’air." %}
-              </span>
-
-            {% elif service == "nabweatherd" %}
-              <span class="nab-quick-card-title">{% trans "Météo" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les prévisions et animations météo." %}
-              </span>
-
-            {% elif service == "nab8balld" %}
-              <span class="nab-quick-card-title">{% trans "Magic 8 Ball" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer le service de réponses aléatoires." %}
-              </span>
-
-            {% elif service == "nabsurprised" %}
-              <span class="nab-quick-card-title">{% trans "Surprises" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les contenus et déclenchements surprise." %}
-              </span>
-
-            {% elif service == "nabbookd" %}
-              <span class="nab-quick-card-title">{% trans "Livres audio" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les contenus audio et leur lecture." %}
-              </span>
-
-            {% elif service == "nabtaichid" %}
-              <span class="nab-quick-card-title">{% trans "Oreilles" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les mouvements automatiques des oreilles." %}
-              </span>
-
-            {% elif service == "nabiftttd" %}
-              <span class="nab-quick-card-title">{% trans "Automatisations" %}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Configurer les déclencheurs et actions connectées." %}
-              </span>
-
-            {% else %}
-              <span class="nab-quick-card-title">{{ service }}</span>
-              <span class="nab-quick-card-text">
-                {% trans "Ouvrir la configuration de ce service." %}
-              </span>
-            {% endif %}
-          </a>
-        {% empty %}
-          <div class="nab-empty-state">
-            {% trans "Aucun service disponible." %}
+    <div class="row">
+      <div class="col-12 mb-4">
+        <div class="nab-card">
+          <div class="nab-section-head">
+            <h2 class="nab-section-title">{% trans "Vue d’ensemble" %}</h2>
+            <p class="nab-section-text">
+              {% trans "Accédez directement aux réglages de chaque service depuis cette page." %}
+            </p>
           </div>
-        {% endfor %}
+
+          <div class="nab-service-overview-grid">
+            {% for service in services %}
+              <a class="nab-service-overview-item" href="#service-{{ service }}">
+                <span class="nab-service-overview-dot"></span>
+
+                {% if service == "nabradio" %}
+                  <span class="nab-service-overview-name">{% trans "Radio" %}</span>
+                {% elif service == "nabmastodond" %}
+                  <span class="nab-service-overview-name">{% trans "Notifications" %}</span>
+                {% elif service == "nabclockd" %}
+                  <span class="nab-service-overview-name">{% trans "Agenda" %}</span>
+                {% elif service == "nabtaichid" %}
+                  <span class="nab-service-overview-name">{% trans "Oreilles" %}</span>
+                {% elif service == "nabiftttd" %}
+                  <span class="nab-service-overview-name">{% trans "Automatisations" %}</span>
+                {% elif service == "nabweatherd" %}
+                  <span class="nab-service-overview-name">{% trans "Météo" %}</span>
+                {% elif service == "nabairqualityd" %}
+                  <span class="nab-service-overview-name">{% trans "Qualité de l’air" %}</span>
+                {% elif service == "nab8balld" %}
+                  <span class="nab-service-overview-name">{% trans "Magic 8 Ball" %}</span>
+                {% elif service == "nabsurprised" %}
+                  <span class="nab-service-overview-name">{% trans "Surprises" %}</span>
+                {% elif service == "nabbookd" %}
+                  <span class="nab-service-overview-name">{% trans "Livres audio" %}</span>
+                {% else %}
+                  <span class="nab-service-overview-name">{{ service }}</span>
+                {% endif %}
+              </a>
+            {% empty %}
+              <div class="nab-empty-state">
+                {% trans "Aucun service disponible." %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
       </div>
     </div>
+
+    <div class="row">
+      {% for service in services %}
+        <div class="col-12 mb-4">
+          <section
+            id="service-{{ service }}"
+            class="nab-card nab-service-config-card"
+          >
+            <div class="nab-section-head">
+              {% if service == "nabradio" %}
+                <h2 class="nab-section-title">{% trans "Radio" %}</h2>
+                <p class="nab-section-text">{% trans "Gestion des radios web et de leur lecture." %}</p>
+              {% elif service == "nabmastodond" %}
+                <h2 class="nab-section-title">{% trans "Notifications" %}</h2>
+                <p class="nab-section-text">{% trans "Notifications et services connectés." %}</p>
+              {% elif service == "nabclockd" %}
+                <h2 class="nab-section-title">{% trans "Agenda" %}</h2>
+                <p class="nab-section-text">{% trans "Planification et événements." %}</p>
+              {% elif service == "nabtaichid" %}
+                <h2 class="nab-section-title">{% trans "Oreilles" %}</h2>
+                <p class="nab-section-text">{% trans "Mouvements automatiques des oreilles." %}</p>
+              {% elif service == "nabiftttd" %}
+                <h2 class="nab-section-title">{% trans "Automatisations" %}</h2>
+                <p class="nab-section-text">{% trans "Actions et déclencheurs connectés." %}</p>
+              {% elif service == "nabweatherd" %}
+                <h2 class="nab-section-title">{% trans "Météo" %}</h2>
+                <p class="nab-section-text">{% trans "Prévisions et animations météo." %}</p>
+              {% elif service == "nabairqualityd" %}
+                <h2 class="nab-section-title">{% trans "Qualité de l’air" %}</h2>
+                <p class="nab-section-text">{% trans "Informations sur la qualité de l’air." %}</p>
+              {% elif service == "nab8balld" %}
+                <h2 class="nab-section-title">{% trans "Magic 8 Ball" %}</h2>
+                <p class="nab-section-text">{% trans "Réponses aléatoires." %}</p>
+              {% elif service == "nabsurprised" %}
+                <h2 class="nab-section-title">{% trans "Surprises" %}</h2>
+                <p class="nab-section-text">{% trans "Déclenchement de contenus surprise." %}</p>
+              {% elif service == "nabbookd" %}
+                <h2 class="nab-section-title">{% trans "Livres audio" %}</h2>
+                <p class="nab-section-text">{% trans "Lecture et gestion des contenus audio." %}</p>
+              {% else %}
+                <h2 class="nab-section-title">{{ service }}</h2>
+                <p class="nab-section-text">{% trans "Configuration du service." %}</p>
+              {% endif %}
+            </div>
+
+            <div
+              class="settings nab-service-settings-container"
+              data-url="/{{ service }}/settings"
+              data-service="{{ service }}"
+            >
+              <div class="nab-loading-card">
+                <div class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></div>
+                <span>{% trans "Chargement de la configuration…" %}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      {% empty %}
+        <div class="col-12">
+          <div class="nab-card">
+            <div class="nab-empty-state">
+              {% trans "Aucun service détecté." %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
   </section>
+
+  <style>
+    .nab-service-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .nab-service-overview-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      color: #1f2937;
+      text-decoration: none !important;
+      font-weight: 600;
+    }
+
+    .nab-service-overview-item:hover {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #3341b5;
+    }
+
+    .nab-service-overview-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #4f7cff;
+      flex: 0 0 auto;
+    }
+
+    .nab-service-overview-name {
+      line-height: 1.2;
+    }
+
+    .nab-service-config-card {
+      scroll-margin-top: 90px;
+    }
+
+    .nab-service-settings-container > .card,
+    .nab-service-settings-container > .alert,
+    .nab-service-settings-container > .nab-loading-card {
+      margin-bottom: 0;
+    }
+
+    .nab-service-settings-container .card {
+      box-shadow: none !important;
+      border: 1px solid #e5e7eb !important;
+      background: #fcfcfd;
+    }
+
+    .nab-service-settings-container .card + .card {
+      margin-top: 14px;
+    }
+
+    .nab-service-settings-container .card-header {
+      border-bottom: 1px solid #eef2f7;
+      background: #fff;
+    }
+
+    .nab-service-settings-container .btn {
+      min-height: 42px;
+    }
+
+    @media (max-width: 575.98px) {
+      .nab-service-overview-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <script type="text/javascript">
+    $(function() {
+      $("div.settings").each(function(index, element) {
+        var url = $(element).data("url");
+
+        $.get(url, function(data) {
+          $(element).html(data);
+        }).fail(function() {
+          $(element).html(
+            '<div class="alert alert-warning mb-0" role="alert">{% trans "Impossible de charger la configuration de ce service." %}</div>'
+          );
+        });
+      });
+    });
+  </script>
 {% endblock %}
