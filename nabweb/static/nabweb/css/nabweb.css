@@ -481,3 +481,34 @@ select:focus {
     font-size: 0.76rem;
   }
 }
+
+/* --- FIX sliders trop grands --- */
+
+.nab-service-settings-container input[type="range"] {
+  height: 24px !important;       /* divisé par 2 environ */
+  padding: 0 !important;
+}
+
+.nab-service-settings-container input[type="range"]::-webkit-slider-thumb {
+  height: 16px;
+  width: 16px;
+  margin-top: -6px;              /* recentrage */
+}
+
+.nab-service-settings-container input[type="range"]::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+}
+
+.nab-service-settings-container input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+}
+
+.nab-service-settings-container input[type="range"]::-moz-range-track {
+  height: 4px;
+}
+
+/* évite que Bootstrap gonfle tout */
+.nab-service-settings-container .form-control[type="range"] {
+  height: 24px !important;
+}
