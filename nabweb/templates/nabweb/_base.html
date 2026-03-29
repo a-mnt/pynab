@@ -5,13 +5,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="theme-color" content="#6c63ff">
+    <meta name="theme-color" content="#5b5bd6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="shortcut icon" href="{% static 'nabweb/favicon/favicon.ico' %}"/>
 
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=2">
 
     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
 
@@ -25,77 +26,79 @@
   </head>
 
   <body class="nab-body">
-    <header class="nab-topbar border-bottom">
-      <nav class="navbar navbar-expand-lg navbar-light nab-navbar">
-        <a class="navbar-brand d-flex align-items-center" href="/">
-          <span class="nab-brand-mark">N</span>
-          <span class="nab-brand-text">
-            <span class="nab-brand-title">{% trans "Nabaztag" %}</span>
-            <span class="nab-brand-subtitle">{% trans "Configuration" %}</span>
-          </span>
-        </a>
+    <header class="nab-topbar">
+      <div class="container-fluid nab-container">
+        <nav class="navbar navbar-expand-lg navbar-light nab-navbar px-0">
+          <a class="navbar-brand nab-brand" href="/">
+            <span class="nab-brand-badge">N</span>
+            <span class="nab-brand-stack">
+              <span class="nab-brand-title">{% trans "Nabaztag" %}</span>
+              <span class="nab-brand-subtitle">{% trans "Configuration" %}</span>
+            </span>
+          </a>
 
-        <button
-          class="navbar-toggler nab-navbar-toggler"
-          type="button"
-          data-toggle="collapse"
-          data-target="#navbarSupportedContent"
-          aria-controls="navbarSupportedContent"
-          aria-expanded="false"
-          aria-label="{% trans 'Toggle navigation' %}"
-        >
-          <span class="navbar-toggler-icon"></span>
-        </button>
+          <button
+            class="navbar-toggler nab-navbar-toggler"
+            type="button"
+            data-toggle="collapse"
+            data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent"
+            aria-expanded="false"
+            aria-label="{% trans 'Toggle navigation' %}"
+          >
+            <span class="navbar-toggler-icon"></span>
+          </button>
 
-        <div class="collapse navbar-collapse" id="navbarSupportedContent">
-          <ul class="navbar-nav mr-auto nab-main-nav">
-            <li class="nav-item">
-              <a class="nav-link{% if request.path == '/' %} active{% endif %}" href="/">
-                {% trans "Home" %}
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link{% if request.path == '/services/' %} active{% endif %}" href="/services/">
-                {% trans "Services" %}
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link{% if request.path == '/rfid/' %} active{% endif %}" href="/rfid/">
-                {% trans "NFC" %}
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link{% if request.path == '/system-info/' %} active{% endif %}" href="/system-info/">
-                {% trans "System Information" %}
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link upgrade-link{% if request.path == '/upgrade/' %} active{% endif %}" href="/upgrade/">
-                {% trans "Upgrade" %}
-                <span class="badge badge-pill badge-info ml-1"></span>
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link{% if request.path == '/help/' %} active{% endif %}" href="/help/" target="_blank" rel="noopener noreferrer">
-                {% trans "Help" %}
-              </a>
-            </li>
-          </ul>
+          <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav ml-auto nab-main-nav">
+              <li class="nav-item">
+                <a class="nav-link{% if request.path == '/' %} active{% endif %}" href="/">
+                  {% trans "Home" %}
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link{% if request.path == '/services/' %} active{% endif %}" href="/services/">
+                  {% trans "Services" %}
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link{% if request.path == '/rfid/' %} active{% endif %}" href="/rfid/">
+                  {% trans "NFC" %}
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link{% if request.path == '/system-info/' %} active{% endif %}" href="/system-info/">
+                  {% trans "System Information" %}
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link upgrade-link{% if request.path == '/upgrade/' %} active{% endif %}" href="/upgrade/">
+                  {% trans "Upgrade" %}
+                  <span class="badge badge-pill badge-info ml-1"></span>
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link{% if request.path == '/help/' %} active{% endif %}" href="/help/" target="_blank" rel="noopener noreferrer">
+                  {% trans "Help" %}
+                </a>
+              </li>
+            </ul>
 
-          <div class="nab-topbar-actions">
-            <a
-              class="nab-github-link"
-              href="https://github.com/nabaztag2018/pynab"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="GitHub"
-              title="GitHub"
-            >
-              <img src="{% static 'nabweb/images/GitHub-Mark-32px.png' %}" alt="GitHub" width="20" height="20">
-            </a>
+            <div class="nab-topbar-actions">
+              <a
+                class="nab-github-link"
+                href="https://github.com/nabaztag2018/pynab"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="GitHub"
+                title="GitHub"
+              >
+                <img src="{% static 'nabweb/images/GitHub-Mark-32px.png' %}" alt="GitHub" width="18" height="18">
+              </a>
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </div>
     </header>
 
     <main class="nab-page">
