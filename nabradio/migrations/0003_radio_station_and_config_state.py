@@ -5,7 +5,7 @@ import django.db.models.deletion
 DEFAULT_RADIOS = [
     {
         "name": "Pomme d'Api",
-        "url": "radiopommedapi.com/radio.mp3",
+        "url": "http://radiopommedapi.com/radio.mp3",
     },
     {
         "name": "Radio Barbapapa",
@@ -48,7 +48,10 @@ def populate_default_radios(apps, schema_editor):
         )
         created.append(station)
 
-    config = Config.load()
+    config = Config.objects.first()
+    if config is None:
+        config = Config.objects.create()
+
     if created and config.selected_station_id is None:
         config.selected_station = created[0]
         config.is_playing = False
@@ -66,17 +69,25 @@ def renumber_positions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("nabradio", "0001_initial"),
+        ("nabradio", "0002_config_json_data_base"),
     ]
 
     operations = [
         migrations.CreateModel(
             name="RadioStation",
             fields=[
-                ("id", models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("name", models.CharField(max_length=255)),
                 ("stream_url", models.TextField(unique=True)),
-                ("position", models.PositiveIntegerField(db_index=True, default=0)),
+                ("position", models.PositiveIntegerField(default=0, db_index=True)),
                 ("is_favorite", models.BooleanField(default=False)),
                 ("is_active", models.BooleanField(default=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
@@ -84,14 +95,6 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["position", "id"],
             },
-        ),
-        migrations.RemoveField(
-            model_name="config",
-            name="streaming_url",
-        ),
-        migrations.RemoveField(
-            model_name="config",
-            name="json_data_base",
         ),
         migrations.AddField(
             model_name="config",
@@ -111,4 +114,8 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(populate_default_radios, migrations.RunPython.noop),
         migrations.RunPython(renumber_positions, migrations.RunPython.noop),
+        migrations.RemoveField(
+            model_name="config",
+            name="streaming_url",
+        ),
     ]
