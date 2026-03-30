@@ -8,24 +8,16 @@ DEFAULT_RADIOS = [
         "url": "http://radiopommedapi.com/radio.mp3",
     },
     {
-        "name": "Radio Barbapapa",
-        "url": "http://streaming.radio.rtl.fr/barbapapa-1-128.mp3",
-    },
-    {
         "name": "Radio Disney",
-        "url": "http://radiodisney.ice.infomaniak.ch/radiodisney-high.mp3",
+        "url": "http://mfmwr-002.ice.infomaniak.ch/mfmwr-002.mp3",
     },
     {
         "name": "Allzic Radio Enfants",
-        "url": "http://allzic21.ice.infomaniak.ch/allzic-enfants.mp3",
-    },
-    {
-        "name": "Crooner Radio Kids",
-        "url": "http://stream.crooner.fr/croonerkids-128.mp3",
+        "url": "https://allzic16.ice.infomaniak.ch/allzic16.aac",
     },
     {
         "name": "Fun Kids Radio",
-        "url": "http://media-ice.musicradio.com/FunKidsMP3",
+        "url": "https://listen-funkids.sharp-stream.com/funkids.aac",
     },
 ]
 
