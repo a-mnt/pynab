@@ -7,7 +7,7 @@
 
   <div class="card-body">
     <p class="text-muted mb-4">
-      {% trans "Lecture directe, choix de la station par défaut et gestion de votre liste de radios." %}
+      {% trans "Lecture, arrêt, favoris et ordre personnalisé des stations." %}
     </p>
 
     {% if flash_message %}
@@ -16,31 +16,35 @@
       </div>
     {% endif %}
 
+    <div class="alert alert-light mb-4" role="alert">
+      <strong>{% trans "Station actuelle :" %}</strong> {{ selected_name }}
+      {% if is_playing %}
+        <span class="badge badge-success ml-2">{% trans "En lecture" %}</span>
+      {% else %}
+        <span class="badge badge-secondary ml-2">{% trans "Arrêtée" %}</span>
+      {% endif %}
+      <div class="small text-muted mt-2">
+        {% trans "Oreille droite pendant la lecture : sens horaire = suivante, sens anti-horaire = précédente." %}
+      </div>
+      <div class="small text-muted mt-1">
+        {% blocktrans with count=favorites_count %}Nombre de favoris : {{ count }}{% endblocktrans %}
+      </div>
+    </div>
+
     <div class="row">
       <div class="col-12 col-xl-6 mb-4">
         <div class="border rounded p-3 h-100">
           <h6 class="font-weight-bold mb-3">{% trans "Lecture" %}</h6>
 
-          <form
-            class="js-nabradio-control-form"
-            method="post"
-            action="{% url 'nabradio.control' %}"
-          >
+          <form class="js-nabradio-control-form" method="post" action="{% url 'nabradio.control' %}">
             {% csrf_token %}
 
             <div class="form-group">
               <label for="nabradio-selected-radio-control">{% trans "Radio sélectionnée" %}</label>
-              <select
-                class="form-control"
-                id="nabradio-selected-radio-control"
-                name="selected_radio"
-              >
+              <select class="form-control" id="nabradio-selected-radio-control" name="selected_radio">
                 {% for radio in radios %}
-                  <option
-                    value="{{ radio.url }}"
-                    {% if radio.url == selected_url %}selected{% endif %}
-                  >
-                    {{ radio.name }}
+                  <option value="{{ radio.id }}" {% if radio.id == selected_station_id %}selected{% endif %}>
+                    {% if radio.is_favorite %}★ {% endif %}{{ radio.name }}
                   </option>
                 {% endfor %}
               </select>
@@ -51,18 +55,10 @@
                 {% trans "Lecture" %}
               </button>
 
-              <button type="submit" class="btn btn-outline-secondary js-radio-action" name="action" value="pause">
-                {% trans "Pause" %}
-              </button>
-
               <button type="submit" class="btn btn-outline-danger js-radio-action" name="action" value="stop">
                 {% trans "Stop" %}
               </button>
             </div>
-
-            <small class="form-text text-muted mt-3">
-              {% trans "La pause interrompt le flux en cours et conserve la station sélectionnée." %}
-            </small>
 
             <div class="js-nabradio-control-feedback mt-3"></div>
           </form>
@@ -73,27 +69,16 @@
         <div class="border rounded p-3 h-100">
           <h6 class="font-weight-bold mb-3">{% trans "Configuration" %}</h6>
 
-          <form
-            class="js-nabradio-settings-form"
-            method="post"
-            action="{% url 'nabradio.settings' %}"
-          >
+          <form class="js-nabradio-settings-form" method="post" action="{% url 'nabradio.settings' %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_selection">
 
             <div class="form-group">
               <label for="nabradio-selected-radio">{% trans "Radio par défaut" %}</label>
-              <select
-                class="form-control"
-                id="nabradio-selected-radio"
-                name="selected_radio"
-              >
+              <select class="form-control" id="nabradio-selected-radio" name="selected_radio">
                 {% for radio in radios %}
-                  <option
-                    value="{{ radio.url }}"
-                    {% if radio.url == selected_url %}selected{% endif %}
-                  >
-                    {{ radio.name }}
+                  <option value="{{ radio.id }}" {% if radio.id == selected_station_id %}selected{% endif %}>
+                    {% if radio.is_favorite %}★ {% endif %}{{ radio.name }}
                   </option>
                 {% endfor %}
               </select>
@@ -108,38 +93,50 @@
         </div>
       </div>
 
-      <div class="col-12 col-xl-6 mb-4">
-        <div class="border rounded p-3 h-100">
+      <div class="col-12 mb-4">
+        <div class="border rounded p-3">
           <h6 class="font-weight-bold mb-3">{% trans "Ajouter une radio" %}</h6>
 
-          <form
-            class="js-nabradio-settings-form"
-            method="post"
-            action="{% url 'nabradio.settings' %}"
-          >
+          <form class="js-nabradio-settings-form" method="post" action="{% url 'nabradio.settings' %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="add_radio">
 
-            <div class="form-group">
-              <label for="nabradio-radio-name">{% trans "Nom" %}</label>
-              <input
-                type="text"
-                class="form-control"
-                id="nabradio-radio-name"
-                name="radio_name"
-                placeholder="{% trans 'Ex. Jazz Radio' %}"
-              >
-            </div>
+            <div class="row">
+              <div class="col-12 col-lg-4">
+                <div class="form-group">
+                  <label for="nabradio-radio-name">{% trans "Nom" %}</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="nabradio-radio-name"
+                    name="radio_name"
+                    placeholder="{% trans 'Ex. Jazz Radio' %}"
+                  >
+                </div>
+              </div>
 
-            <div class="form-group">
-              <label for="nabradio-radio-url">{% trans "URL du flux" %}</label>
-              <input
-                type="text"
-                class="form-control"
-                id="nabradio-radio-url"
-                name="radio_url"
-                placeholder="https://..."
-              >
+              <div class="col-12 col-lg-6">
+                <div class="form-group">
+                  <label for="nabradio-radio-url">{% trans "URL du flux" %}</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="nabradio-radio-url"
+                    name="radio_url"
+                    placeholder="https://..."
+                  >
+                </div>
+              </div>
+
+              <div class="col-12 col-lg-2">
+                <div class="form-group">
+                  <label>&nbsp;</label>
+                  <div class="form-control d-flex align-items-center">
+                    <input type="checkbox" id="nabradio-radio-favorite" name="radio_favorite" value="1" class="mr-2">
+                    <label for="nabradio-radio-favorite" class="mb-0">{% trans "Favori" %}</label>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="d-flex justify-content-end">
@@ -151,35 +148,65 @@
         </div>
       </div>
 
-      <div class="col-12 col-xl-6 mb-4">
-        <div class="border rounded p-3 h-100">
-          <h6 class="font-weight-bold mb-3">{% trans "Radios enregistrées" %}</h6>
+      <div class="col-12">
+        <div class="border rounded p-3">
+          <h6 class="font-weight-bold mb-3">{% trans "Stations enregistrées" %}</h6>
 
           {% if radios %}
             <div class="list-group">
               {% for radio in radios %}
                 <div class="list-group-item">
-                  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center">
-                    <div class="mb-2 mb-md-0 pr-md-3">
-                      <div class="font-weight-bold">{{ radio.name }}</div>
-                      <div class="text-muted" style="word-break: break-all;">
-                        {{ radio.url }}
+                  <div class="d-flex flex-column">
+                    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center">
+                      <div class="mb-3 mb-lg-0 pr-lg-3">
+                        <div class="font-weight-bold">
+                          {% if radio.is_favorite %}★ {% endif %}{{ radio.name }}
+                          {% if radio.id == selected_station_id %}
+                            <span class="badge badge-primary ml-2">{% trans "Sélectionnée" %}</span>
+                          {% endif %}
+                        </div>
+                        <div class="text-muted" style="word-break: break-all;">
+                          {{ radio.stream_url }}
+                        </div>
+                        <div class="small text-muted mt-1">
+                          {% trans "Ordre" %} : {{ radio.position }}
+                        </div>
+                      </div>
+
+                      <div class="d-flex flex-wrap" style="gap: 8px;">
+                        <form class="js-nabradio-settings-form mb-0" method="post" action="{% url 'nabradio.settings' %}">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="move_up">
+                          <input type="hidden" name="station_id" value="{{ radio.id }}">
+                          <button type="submit" class="btn btn-outline-secondary btn-sm">↑</button>
+                        </form>
+
+                        <form class="js-nabradio-settings-form mb-0" method="post" action="{% url 'nabradio.settings' %}">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="move_down">
+                          <input type="hidden" name="station_id" value="{{ radio.id }}">
+                          <button type="submit" class="btn btn-outline-secondary btn-sm">↓</button>
+                        </form>
+
+                        <form class="js-nabradio-settings-form mb-0" method="post" action="{% url 'nabradio.settings' %}">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="toggle_favorite">
+                          <input type="hidden" name="station_id" value="{{ radio.id }}">
+                          <button type="submit" class="btn btn-outline-warning btn-sm">
+                            {% if radio.is_favorite %}{% trans "Retirer favori" %}{% else %}{% trans "Mettre en favori" %}{% endif %}
+                          </button>
+                        </form>
+
+                        <form class="js-nabradio-settings-form mb-0" method="post" action="{% url 'nabradio.settings' %}">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="delete_radio">
+                          <input type="hidden" name="station_id" value="{{ radio.id }}">
+                          <button type="submit" class="btn btn-outline-danger btn-sm">
+                            {% trans "Supprimer" %}
+                          </button>
+                        </form>
                       </div>
                     </div>
-
-                    <form
-                      class="js-nabradio-settings-form mb-0"
-                      method="post"
-                      action="{% url 'nabradio.settings' %}"
-                    >
-                      {% csrf_token %}
-                      <input type="hidden" name="action" value="delete_radio">
-                      <input type="hidden" name="radio_url" value="{{ radio.url }}">
-
-                      <button type="submit" class="btn btn-outline-danger btn-sm">
-                        {% trans "Supprimer" %}
-                      </button>
-                    </form>
                   </div>
                 </div>
               {% endfor %}
@@ -217,10 +244,9 @@
 
         var form = $(this);
         var root = findRadioRoot(form);
-        var actionUrl = form.attr("action");
 
         $.ajax({
-          url: actionUrl,
+          url: form.attr("action"),
           method: "POST",
           data: form.serialize(),
           success: function(html) {
@@ -261,8 +287,15 @@
             feedback.html(
               '<div class="alert alert-success mb-0" role="alert">' +
                 response.message +
-              "</div>"
+              '</div>'
             );
+
+            var root = findRadioRoot(form);
+            $.get("{% url 'nabradio.settings' %}", function(html) {
+              if (root.hasClass("nab-service-settings-container")) {
+                root.html(html);
+              }
+            });
           },
           error: function(xhr) {
             var message = "Action impossible.";
@@ -273,7 +306,7 @@
             feedback.html(
               '<div class="alert alert-danger mb-0" role="alert">' +
                 message +
-              "</div>"
+              '</div>'
             );
           }
         });

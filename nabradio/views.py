@@ -1,228 +1,238 @@
-import datetime
-import json
-import socket
-from typing import Dict, List
+from typing import Optional
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.generic import TemplateView
 
 from . import rfid_data
-from .models import Config
+from .models import Config, RadioStation
 
 
-RADIO_REQUEST_ID = "nabradio-live"
+def _signal_radio_daemon() -> None:
+    from .nabradio import NabRadio
+
+    NabRadio.signal_daemon()
 
 
-def _default_radios() -> List[Dict[str, str]]:
-    return [
-        {
-            "name": "FIP",
-            "url": "https://icecast.radiofrance.fr/fip-hifi.aac",
-        },
-        {
-            "name": "France Inter",
-            "url": "https://icecast.radiofrance.fr/franceinter-hifi.aac",
-        },
-        {
-            "name": "France Info",
-            "url": "https://icecast.radiofrance.fr/franceinfo-hifi.aac",
-        },
-        {
-            "name": "Nostalgie",
-            "url": "https://scdn.nrjaudio.fm/fr/30601/aac_64.mp3",
-        },
+def _ordered_stations():
+    return list(RadioStation.objects.filter(is_active=True).order_by("position", "id"))
+
+
+def _all_stations():
+    return list(RadioStation.objects.all().order_by("position", "id"))
+
+
+def _normalize_positions() -> None:
+    stations = _all_stations()
+    for index, station in enumerate(stations):
+        if station.position != index:
+            station.position = index
+            station.save(update_fields=["position"])
+
+
+def _ensure_default_stations() -> None:
+    if RadioStation.objects.exists():
+        return
+
+    defaults = [
+        ("FIP", "https://icecast.radiofrance.fr/fip-hifi.aac", True),
+        ("France Inter", "https://icecast.radiofrance.fr/franceinter-hifi.aac", False),
+        ("France Info", "https://icecast.radiofrance.fr/franceinfo-hifi.aac", False),
+        ("Nostalgie", "https://scdn.nrjaudio.fm/fr/30601/aac_64.mp3", False),
     ]
-
-
-def _normalize_radios(radios: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    cleaned: List[Dict[str, str]] = []
-    seen_urls = set()
-
-    for radio in radios:
-        name = str(radio.get("name", "")).strip()
-        url = str(radio.get("url", "")).strip()
-
-        if not name or not url:
-            continue
-        if url in seen_urls:
-            continue
-
-        cleaned.append({"name": name, "url": url})
-        seen_urls.add(url)
-
-    return cleaned
-
-
-def _load_radio_state(config: Config) -> Dict[str, object]:
-    radios = _default_radios()
-
-    if config.json_data_base:
-        try:
-            raw = json.loads(config.json_data_base)
-
-            if isinstance(raw, dict):
-                radios = raw.get("radios", radios)
-            elif isinstance(raw, list):
-                radios = raw
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
-
-    radios = _normalize_radios(radios)
-
-    if not radios:
-        radios = _default_radios()
-
-    selected_url = (config.streaming_url or "").strip()
-
-    if not selected_url:
-        selected_url = radios[0]["url"]
-
-    if selected_url and all(r["url"] != selected_url for r in radios):
-        radios.append(
-            {
-                "name": "Station personnalisée",
-                "url": selected_url,
-            }
+    for index, (name, url, favorite) in enumerate(defaults):
+        RadioStation.objects.create(
+            name=name,
+            stream_url=url,
+            position=index,
+            is_favorite=favorite,
+            is_active=True,
         )
 
-    selected_name = ""
-    for radio in radios:
-        if radio["url"] == selected_url:
-            selected_name = radio["name"]
-            break
+    config = Config.load()
+    if config.selected_station_id is None:
+        config.selected_station = RadioStation.objects.order_by("position", "id").first()
+        config.save()
+
+
+def _get_or_create_config() -> Config:
+    _ensure_default_stations()
+    config = Config.load()
+    if config.selected_station_id is None:
+        config.selected_station = RadioStation.objects.filter(is_active=True).order_by("position", "id").first()
+        config.save()
+    return config
+
+
+def _selected_station_from_request(request) -> Optional[RadioStation]:
+    station_id = request.POST.get("selected_radio", "").strip()
+    if not station_id:
+        return None
+    try:
+        return RadioStation.objects.get(pk=int(station_id))
+    except (ValueError, RadioStation.DoesNotExist):
+        return None
+
+
+def _build_context(**extra):
+    config = _get_or_create_config()
+    stations = _all_stations()
+    selected_station = config.selected_station or (stations[0] if stations else None)
 
     return {
-        "radios": radios,
-        "selected_url": selected_url,
-        "selected_name": selected_name,
+        "radios": stations,
+        "selected_station": selected_station,
+        "selected_station_id": selected_station.id if selected_station else None,
+        "selected_name": selected_station.name if selected_station else "",
+        "is_playing": bool(config.is_playing),
+        "favorites_count": sum(1 for station in stations if station.is_favorite),
+        "flash_message": extra.get("flash_message", ""),
+        "flash_type": extra.get("flash_type", "success"),
     }
 
 
-def _save_radio_state(config: Config, radios: List[Dict[str, str]], selected_url: str) -> None:
-    radios = _normalize_radios(radios)
+@transaction.atomic
+def _move_station(station: RadioStation, direction: str) -> None:
+    stations = _all_stations()
+    current_index = next((index for index, item in enumerate(stations) if item.id == station.id), None)
+    if current_index is None:
+        return
 
-    if not radios:
-        radios = _default_radios()
+    if direction == "up" and current_index > 0:
+        swap_index = current_index - 1
+    elif direction == "down" and current_index < len(stations) - 1:
+        swap_index = current_index + 1
+    else:
+        return
 
-    selected_url = selected_url.strip()
-
-    if selected_url and all(r["url"] != selected_url for r in radios):
-        radios.append(
-            {
-                "name": "Station personnalisée",
-                "url": selected_url,
-            }
-        )
-
-    if not selected_url:
-        selected_url = radios[0]["url"]
-
-    config.streaming_url = selected_url
-    config.json_data_base = json.dumps(
-        {"radios": radios},
-        ensure_ascii=False,
-    )
-    config.save()
-
-
-def _send_nabd_packet(packet: Dict[str, object]) -> None:
-    payload = json.dumps(packet) + "\r\n"
-
-    with socket.create_connection(("127.0.0.1", 10543), timeout=3) as sock:
-        sock.sendall(payload.encode("utf8"))
-
-
-def _play_radio(streaming_url: str) -> None:
-    now = datetime.datetime.now(datetime.timezone.utc)
-    expiration = now + datetime.timedelta(minutes=10)
-
-    packet = {
-        "type": "message",
-        "request_id": RADIO_REQUEST_ID,
-        "signature": {
-            "audio": ["nabradio/*.mp3"],
-        },
-        "body": [
-            {
-                "audio": [streaming_url],
-            }
-        ],
-        "expiration": expiration.isoformat(),
-    }
-    _send_nabd_packet(packet)
-
-
-def _stop_radio() -> None:
-    packet = {
-        "type": "cancel",
-        "request_id": RADIO_REQUEST_ID,
-    }
-    _send_nabd_packet(packet)
+    other = stations[swap_index]
+    station.position, other.position = other.position, station.position
+    station.save(update_fields=["position"])
+    other.save(update_fields=["position"])
+    _normalize_positions()
 
 
 class SettingsView(TemplateView):
     template_name = "nabradio/settings.html"
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        config = Config.load()
-        state = _load_radio_state(config)
-
-        context["radios"] = state["radios"]
-        context["selected_url"] = state["selected_url"]
-        context["selected_name"] = state["selected_name"]
-        context["flash_message"] = kwargs.get("flash_message", "")
-        context["flash_type"] = kwargs.get("flash_type", "success")
-        return context
-
     def get(self, request, *args, **kwargs):
-        context = self.get_context_data(**kwargs)
-        return render(request, self.template_name, context=context)
+        return render(request, self.template_name, context=_build_context())
 
     def post(self, request, *args, **kwargs):
-        config = Config.load()
-        state = _load_radio_state(config)
-        radios = list(state["radios"])
-        selected_url = str(state["selected_url"])
-
-        action = request.POST.get("action", "")
+        config = _get_or_create_config()
+        action = request.POST.get("action", "").strip()
         flash_message = ""
         flash_type = "success"
 
         if action == "save_selection":
-            selected_url = request.POST.get("selected_radio", "").strip()
-
-            if not selected_url:
+            station = _selected_station_from_request(request)
+            if station is None:
                 flash_message = "Choisissez une radio."
                 flash_type = "danger"
             else:
-                _save_radio_state(config, radios, selected_url)
+                config.selected_station = station
+                config.save(update_fields=["selected_station"])
+                _signal_radio_daemon()
                 flash_message = "Sélection enregistrée."
 
         elif action == "add_radio":
             radio_name = request.POST.get("radio_name", "").strip()
             radio_url = request.POST.get("radio_url", "").strip()
+            is_favorite = request.POST.get("radio_favorite") == "1"
 
             if not radio_name or not radio_url:
                 flash_message = "Nom et URL sont requis."
                 flash_type = "danger"
+            elif RadioStation.objects.filter(stream_url=radio_url).exists():
+                flash_message = "Cette radio existe déjà."
+                flash_type = "danger"
             else:
-                radios.append({"name": radio_name, "url": radio_url})
-                _save_radio_state(config, radios, selected_url or radio_url)
+                last_position = RadioStation.objects.count()
+                station = RadioStation.objects.create(
+                    name=radio_name,
+                    stream_url=radio_url,
+                    position=last_position,
+                    is_favorite=is_favorite,
+                    is_active=True,
+                )
+                if config.selected_station_id is None:
+                    config.selected_station = station
+                    config.save(update_fields=["selected_station"])
+                _signal_radio_daemon()
                 flash_message = "Radio ajoutée."
 
         elif action == "delete_radio":
-            radio_url = request.POST.get("radio_url", "").strip()
-            radios = [radio for radio in radios if radio["url"] != radio_url]
+            station_id = request.POST.get("station_id", "").strip()
+            try:
+                station = RadioStation.objects.get(pk=int(station_id))
+            except (ValueError, RadioStation.DoesNotExist):
+                station = None
 
-            if selected_url == radio_url:
-                selected_url = radios[0]["url"] if radios else ""
+            if station is None:
+                flash_message = "Radio introuvable."
+                flash_type = "danger"
+            elif RadioStation.objects.count() <= 1:
+                flash_message = "Impossible de supprimer la dernière radio."
+                flash_type = "danger"
+            else:
+                was_selected = config.selected_station_id == station.id
+                station.delete()
+                _normalize_positions()
 
-            _save_radio_state(config, radios, selected_url)
-            flash_message = "Radio supprimée."
+                if was_selected:
+                    config.selected_station = RadioStation.objects.filter(is_active=True).order_by("position", "id").first()
+                    config.save(update_fields=["selected_station"])
 
-        context = self.get_context_data(
+                _signal_radio_daemon()
+                flash_message = "Radio supprimée."
+
+        elif action == "toggle_favorite":
+            station_id = request.POST.get("station_id", "").strip()
+            try:
+                station = RadioStation.objects.get(pk=int(station_id))
+            except (ValueError, RadioStation.DoesNotExist):
+                station = None
+
+            if station is None:
+                flash_message = "Radio introuvable."
+                flash_type = "danger"
+            else:
+                station.is_favorite = not station.is_favorite
+                station.save(update_fields=["is_favorite"])
+                flash_message = "Favori mis à jour."
+
+        elif action == "move_up":
+            station_id = request.POST.get("station_id", "").strip()
+            try:
+                station = RadioStation.objects.get(pk=int(station_id))
+            except (ValueError, RadioStation.DoesNotExist):
+                station = None
+
+            if station is None:
+                flash_message = "Radio introuvable."
+                flash_type = "danger"
+            else:
+                _move_station(station, "up")
+                _signal_radio_daemon()
+                flash_message = "Ordre mis à jour."
+
+        elif action == "move_down":
+            station_id = request.POST.get("station_id", "").strip()
+            try:
+                station = RadioStation.objects.get(pk=int(station_id))
+            except (ValueError, RadioStation.DoesNotExist):
+                station = None
+
+            if station is None:
+                flash_message = "Radio introuvable."
+                flash_type = "danger"
+            else:
+                _move_station(station, "down")
+                _signal_radio_daemon()
+                flash_message = "Ordre mis à jour."
+
+        context = _build_context(
             flash_message=flash_message,
             flash_type=flash_type,
         )
@@ -231,42 +241,45 @@ class SettingsView(TemplateView):
 
 class ControlView(TemplateView):
     def post(self, request, *args, **kwargs):
-        config = Config.load()
-        state = _load_radio_state(config)
-        selected_url = request.POST.get("selected_radio", "").strip() or str(state["selected_url"])
+        config = _get_or_create_config()
         action = request.POST.get("action", "").strip()
+        station = _selected_station_from_request(request)
+
+        if station is not None and config.selected_station_id != station.id:
+            config.selected_station = station
+            config.save(update_fields=["selected_station"])
+
+        selected_station = config.selected_station
 
         if action == "play":
-            if not selected_url:
+            if selected_station is None:
                 return JsonResponse(
                     {"status": "error", "message": "Aucune radio sélectionnée."},
                     status=400,
                 )
 
-            _save_radio_state(config, list(state["radios"]), selected_url)
-            _play_radio(selected_url)
+            config.is_playing = True
+            config.save(update_fields=["is_playing"])
+            _signal_radio_daemon()
             return JsonResponse(
                 {
                     "status": "ok",
-                    "message": "Lecture démarrée.",
-                }
-            )
-
-        if action == "pause":
-            _stop_radio()
-            return JsonResponse(
-                {
-                    "status": "ok",
-                    "message": "Pause appliquée (lecture interrompue).",
+                    "message": f"Lecture lancée : {selected_station.name}.",
+                    "selected_name": selected_station.name,
+                    "is_playing": True,
                 }
             )
 
         if action == "stop":
-            _stop_radio()
+            config.is_playing = False
+            config.save(update_fields=["is_playing"])
+            _signal_radio_daemon()
             return JsonResponse(
                 {
                     "status": "ok",
                     "message": "Lecture arrêtée.",
+                    "selected_name": selected_station.name if selected_station else "",
+                    "is_playing": False,
                 }
             )
 
@@ -288,16 +301,7 @@ class RFIDDataView(TemplateView):
         return render(request, RFIDDataView.template_name, context=context)
 
     def post(self, request, *args, **kwargs):
-        data = "DATA_IN_LOCAL_DB"
-        uid = ""
-
-        if "radio_uid" in request.POST:
-            uid = request.POST["radio_uid"]
-
-        if "streaming_url" in request.POST:
-            streaming_url = request.POST["streaming_url"]
-        else:
-            streaming_url = uid
-
+        uid = request.POST.get("radio_uid", "")
+        streaming_url = request.POST.get("streaming_url", uid)
         rfid_data.write_data_ui_for_views(uid, streaming_url)
-        return JsonResponse({"data": data})
+        return JsonResponse({"data": "DATA_IN_LOCAL_DB"})
