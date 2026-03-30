@@ -1,3 +1,6 @@
+import datetime
+import json
+import socket
 from typing import Optional
 
 from django.db import transaction
@@ -9,14 +12,50 @@ from . import rfid_data
 from .models import Config, RadioStation
 
 
+RADIO_REQUEST_ID = "nabradio-live"
+
+
+def _send_nabd_packet(packet) -> None:
+    payload = json.dumps(packet) + "\r\n"
+    with socket.create_connection(("127.0.0.1", 10543), timeout=3) as sock:
+        sock.sendall(payload.encode("utf8"))
+
+
+def _play_stream(stream_url: str) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expiration = now + datetime.timedelta(hours=12)
+
+    packet = {
+        "type": "message",
+        "request_id": RADIO_REQUEST_ID,
+        "signature": {
+            "audio": ["nabradio/*.mp3"],
+        },
+        "body": [
+            {
+                "audio": [stream_url],
+            }
+        ],
+        "expiration": expiration.isoformat(),
+    }
+    _send_nabd_packet(packet)
+
+
+def _stop_stream() -> None:
+    packet = {
+        "type": "cancel",
+        "request_id": RADIO_REQUEST_ID,
+    }
+    _send_nabd_packet(packet)
+
+
 def _signal_radio_daemon() -> None:
-    from .nabradio import NabRadio
+    try:
+        from .nabradio import NabRadio
 
-    NabRadio.signal_daemon()
-
-
-def _ordered_stations():
-    return list(RadioStation.objects.filter(is_active=True).order_by("position", "id"))
+        NabRadio.signal_daemon()
+    except Exception:
+        pass
 
 
 def _all_stations():
@@ -53,6 +92,7 @@ def _ensure_default_stations() -> None:
     config = Config.load()
     if config.selected_station_id is None:
         config.selected_station = RadioStation.objects.order_by("position", "id").first()
+        config.is_playing = False
         config.save()
 
 
@@ -148,11 +188,10 @@ class SettingsView(TemplateView):
                 flash_message = "Cette radio existe déjà."
                 flash_type = "danger"
             else:
-                last_position = RadioStation.objects.count()
                 station = RadioStation.objects.create(
                     name=radio_name,
                     stream_url=radio_url,
-                    position=last_position,
+                    position=RadioStation.objects.count(),
                     is_favorite=is_favorite,
                     is_active=True,
                 )
@@ -258,9 +297,18 @@ class ControlView(TemplateView):
                     status=400,
                 )
 
+            try:
+                _play_stream(selected_station.stream_url)
+            except Exception as exc:
+                return JsonResponse(
+                    {"status": "error", "message": f"Impossible de lancer la lecture: {exc}"},
+                    status=500,
+                )
+
             config.is_playing = True
             config.save(update_fields=["is_playing"])
             _signal_radio_daemon()
+
             return JsonResponse(
                 {
                     "status": "ok",
@@ -271,9 +319,18 @@ class ControlView(TemplateView):
             )
 
         if action == "stop":
+            try:
+                _stop_stream()
+            except Exception as exc:
+                return JsonResponse(
+                    {"status": "error", "message": f"Impossible d'arrêter la lecture: {exc}"},
+                    status=500,
+                )
+
             config.is_playing = False
             config.save(update_fields=["is_playing"])
             _signal_radio_daemon()
+
             return JsonResponse(
                 {
                     "status": "ok",

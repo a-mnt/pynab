@@ -2,7 +2,7 @@ import datetime
 import json
 import logging
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from nabcommon.nabservice import NabService
 
@@ -56,9 +56,11 @@ class NabRadio(NabService):
 
     async def _load_state(self):
         config = await Config.load_async()
-        stations = list(await RadioStation.objects.filter(is_active=True).order_by("position", "id"))
-        selected_station = config.selected_station
+        stations = []
+        async for station in RadioStation.objects.filter(is_active=True).order_by("position", "id"):
+            stations.append(station)
 
+        selected_station = config.selected_station
         if selected_station is None and stations:
             selected_station = stations[0]
             config.selected_station = selected_station
