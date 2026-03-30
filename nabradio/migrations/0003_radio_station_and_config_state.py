@@ -13,11 +13,11 @@ DEFAULT_RADIOS = [
     },
     {
         "name": "Allzic Radio Enfants",
-        "url": "https://allzic16.ice.infomaniak.ch/allzic16.aac",
+        "url": "https://allzic16.ice.infomaniak.ch/allzic16.mp3",
     },
     {
         "name": "Fun Kids Radio",
-        "url": "https://listen-funkids.sharp-stream.com/funkids.aac",
+        "url": "https://listen-funkids.sharp-stream.com/funkids.mp3",
     },
 ]
 
