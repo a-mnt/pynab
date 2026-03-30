@@ -47,15 +47,15 @@
             </div>
 
             <div class="d-flex flex-wrap" style="gap: 10px;">
-              <button type="submit" class="btn btn-primary" name="action" value="play">
+              <button type="submit" class="btn btn-primary js-radio-action" name="action" value="play">
                 {% trans "Lecture" %}
               </button>
 
-              <button type="submit" class="btn btn-outline-secondary" name="action" value="pause">
+              <button type="submit" class="btn btn-outline-secondary js-radio-action" name="action" value="pause">
                 {% trans "Pause" %}
               </button>
 
-              <button type="submit" class="btn btn-outline-danger" name="action" value="stop">
+              <button type="submit" class="btn btn-outline-danger js-radio-action" name="action" value="stop">
                 {% trans "Stop" %}
               </button>
             </div>
@@ -202,6 +202,15 @@
     }
 
     $(document)
+      .off("click.nabradioAction")
+      .on("click.nabradioAction", ".js-radio-action", function() {
+        var button = $(this);
+        var form = button.closest("form");
+        form.data("clicked-action-name", button.attr("name"));
+        form.data("clicked-action-value", button.val());
+      });
+
+    $(document)
       .off("submit.nabradioSettings")
       .on("submit.nabradioSettings", ".js-nabradio-settings-form", function(event) {
         event.preventDefault();
@@ -234,13 +243,20 @@
 
         var form = $(this);
         var feedback = form.find(".js-nabradio-control-feedback");
+        var actionName = form.data("clicked-action-name") || "action";
+        var actionValue = form.data("clicked-action-value") || "";
+        var payload = form.serialize();
+
+        if (actionValue) {
+          payload += "&" + encodeURIComponent(actionName) + "=" + encodeURIComponent(actionValue);
+        }
 
         feedback.html("");
 
         $.ajax({
           url: form.attr("action"),
           method: "POST",
-          data: form.serialize(),
+          data: payload,
           success: function(response) {
             feedback.html(
               '<div class="alert alert-success mb-0" role="alert">' +
