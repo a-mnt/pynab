@@ -165,18 +165,7 @@ class SettingsView(TemplateView):
         flash_message = ""
         flash_type = "success"
 
-        if action == "save_selection":
-            station = _selected_station_from_request(request)
-            if station is None:
-                flash_message = "Choisissez une radio."
-                flash_type = "danger"
-            else:
-                config.selected_station = station
-                config.save(update_fields=["selected_station"])
-                _signal_radio_daemon()
-                flash_message = "Sélection enregistrée."
-
-        elif action == "add_radio":
+        if action == "add_radio":
             radio_name = request.POST.get("radio_name", "").strip()
             radio_url = request.POST.get("radio_url", "").strip()
             is_favorite = request.POST.get("radio_favorite") == "1"
@@ -200,6 +189,39 @@ class SettingsView(TemplateView):
                     config.save(update_fields=["selected_station"])
                 _signal_radio_daemon()
                 flash_message = "Radio ajoutée."
+
+        elif action == "edit_radio":
+            station_id = request.POST.get("station_id", "").strip()
+            radio_name = request.POST.get("radio_name", "").strip()
+            radio_url = request.POST.get("radio_url", "").strip()
+
+            try:
+                station = RadioStation.objects.get(pk=int(station_id))
+            except (ValueError, RadioStation.DoesNotExist):
+                station = None
+
+            if station is None:
+                flash_message = "Radio introuvable."
+                flash_type = "danger"
+            elif not radio_name or not radio_url:
+                flash_message = "Nom et URL sont requis."
+                flash_type = "danger"
+            elif RadioStation.objects.exclude(pk=station.pk).filter(stream_url=radio_url).exists():
+                flash_message = "Cette URL est déjà utilisée."
+                flash_type = "danger"
+            else:
+                station.name = radio_name
+                station.stream_url = radio_url
+                station.save(update_fields=["name", "stream_url"])
+
+                if config.selected_station_id == station.id and config.is_playing:
+                    try:
+                        _play_stream(station.stream_url)
+                    except Exception:
+                        pass
+
+                _signal_radio_daemon()
+                flash_message = "Radio modifiée."
 
         elif action == "delete_radio":
             station_id = request.POST.get("station_id", "").strip()
