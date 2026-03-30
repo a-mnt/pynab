@@ -17,6 +17,7 @@ from django.shortcuts import render
 from django.utils import translation
 from django.utils.translation import to_language, to_locale
 from django.views.generic import View
+from nabradio.views import get_radio_status
 
 from nabcommon import hardware
 from nabcommon.nabservice import NabService
@@ -143,7 +144,22 @@ class NabWebView(BaseView):
     def get_context(self):
         context = super().get_context()
         context["services"] = BaseView.get_services("home")
+        context["radio_status"] = self.get_radio_status_safe()
         return context
+    
+    def get_radio_status_safe(self):
+        try:
+            return get_radio_status()
+        except Exception:
+            return {
+                "selected_station": None,
+                "selected_station_id": None,
+                "selected_name": "",
+                "selected_stream_url": "",
+                "is_playing": False,
+                "radios": [],
+                "favorites_count": 0,
+            }
 
     def post(self, request, *args, **kwargs):
         if "locale" in request.POST:

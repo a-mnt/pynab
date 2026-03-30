@@ -105,6 +105,22 @@ def _get_or_create_config() -> Config:
     return config
 
 
+def get_radio_status():
+    config = _get_or_create_config()
+    stations = _all_stations()
+    selected_station = config.selected_station or (stations[0] if stations else None)
+
+    return {
+        "selected_station": selected_station,
+        "selected_station_id": selected_station.id if selected_station else None,
+        "selected_name": selected_station.name if selected_station else "",
+        "selected_stream_url": selected_station.stream_url if selected_station else "",
+        "is_playing": bool(config.is_playing),
+        "radios": stations,
+        "favorites_count": sum(1 for station in stations if station.is_favorite),
+    }
+
+
 def _selected_station_from_request(request) -> Optional[RadioStation]:
     station_id = request.POST.get("selected_radio", "").strip()
     if not station_id:
@@ -116,20 +132,10 @@ def _selected_station_from_request(request) -> Optional[RadioStation]:
 
 
 def _build_context(**extra):
-    config = _get_or_create_config()
-    stations = _all_stations()
-    selected_station = config.selected_station or (stations[0] if stations else None)
-
-    return {
-        "radios": stations,
-        "selected_station": selected_station,
-        "selected_station_id": selected_station.id if selected_station else None,
-        "selected_name": selected_station.name if selected_station else "",
-        "is_playing": bool(config.is_playing),
-        "favorites_count": sum(1 for station in stations if station.is_favorite),
-        "flash_message": extra.get("flash_message", ""),
-        "flash_type": extra.get("flash_type", "success"),
-    }
+    context = get_radio_status()
+    context["flash_message"] = extra.get("flash_message", "")
+    context["flash_type"] = extra.get("flash_type", "success")
+    return context
 
 
 @transaction.atomic
@@ -336,6 +342,7 @@ class ControlView(TemplateView):
                     "status": "ok",
                     "message": f"Lecture lancée : {selected_station.name}.",
                     "selected_name": selected_station.name,
+                    "selected_station_id": selected_station.id,
                     "is_playing": True,
                 }
             )
@@ -358,6 +365,7 @@ class ControlView(TemplateView):
                     "status": "ok",
                     "message": "Lecture arrêtée.",
                     "selected_name": selected_station.name if selected_station else "",
+                    "selected_station_id": selected_station.id if selected_station else None,
                     "is_playing": False,
                 }
             )

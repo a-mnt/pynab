@@ -12,51 +12,15 @@
       </div>
     {% endif %}
 
-    <div class="alert alert-light mb-4" role="alert">
-      <strong>{% trans "Station actuelle :" %}</strong> {{ selected_name }}
-      {% if is_playing %}
-        <span class="badge badge-success ml-2">{% trans "En lecture" %}</span>
-      {% else %}
-        <span class="badge badge-secondary ml-2">{% trans "Arrêtée" %}</span>
-      {% endif %}
-      <div class="small text-muted mt-2">
-        {% trans "Oreille droite pendant la lecture : sens horaire = suivante, sens anti-horaire = précédente." %}
-      </div>
-    </div>
-
     <div class="border rounded p-3">
-      <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-3">
-        <h6 class="font-weight-bold mb-3 mb-lg-0">{% trans "Stations enregistrées" %}</h6>
-
-        <form class="js-nabradio-control-form mb-0" method="post" action="{% url 'nabradio.control' %}">
-          {% csrf_token %}
-
-          <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center" style="gap: 10px;">
-            <select class="form-control" name="selected_radio" style="min-width: 220px;">
-              {% for radio in radios %}
-                <option value="{{ radio.id }}" {% if radio.id == selected_station_id %}selected{% endif %}>
-                  {% if radio.is_favorite %}★ {% endif %}{{ radio.name }}
-                </option>
-              {% endfor %}
-            </select>
-
-            <button type="submit" class="btn btn-primary js-radio-action" name="action" value="play">
-              {% trans "Lecture" %}
-            </button>
-
-            <button type="submit" class="btn btn-outline-danger js-radio-action" name="action" value="stop">
-              {% trans "Stop" %}
-            </button>
-          </div>
-
-          <div class="js-nabradio-control-feedback mt-3"></div>
-        </form>
+      <div class="d-flex flex-column mb-3">
+        <h6 class="font-weight-bold mb-3">{% trans "Stations enregistrées" %}</h6>
       </div>
 
       {% if radios %}
         <div class="list-group mb-4">
           {% for radio in radios %}
-            <div class="list-group-item">
+            <div class="list-group-item {% if radio.id == selected_station_id %}border-primary{% endif %}">
               <div class="d-flex flex-column">
                 <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center">
                   <div class="mb-3 mb-lg-0 pr-lg-3">
@@ -64,6 +28,11 @@
                       {% if radio.is_favorite %}★ {% endif %}{{ radio.name }}
                       {% if radio.id == selected_station_id %}
                         <span class="badge badge-primary ml-2">{% trans "Sélectionnée" %}</span>
+                        {% if is_playing %}
+                          <span class="badge badge-success ml-2 js-radio-playing-badge">{% trans "En lecture" %}</span>
+                        {% else %}
+                          <span class="badge badge-secondary ml-2 js-radio-playing-badge">{% trans "Arrêtée" %}</span>
+                        {% endif %}
                       {% endif %}
                     </div>
                     <div class="text-muted" style="word-break: break-all;">
@@ -71,7 +40,35 @@
                     </div>
                   </div>
 
-                  <div class="d-flex flex-wrap" style="gap: 8px;">
+                  <div class="d-flex flex-wrap align-items-center" style="gap: 8px;">
+                    {% if radio.id == selected_station_id %}
+                      <form class="js-nabradio-control-form mb-0" method="post" action="{% url 'nabradio.control' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="selected_radio" value="{{ radio.id }}">
+
+                        <button type="submit" class="btn btn-primary btn-sm js-radio-action" name="action" value="play">
+                          {% trans "Lecture" %}
+                        </button>
+
+                        <button type="submit" class="btn btn-outline-danger btn-sm js-radio-action" name="action" value="stop">
+                          {% trans "Stop" %}
+                        </button>
+
+                        <div class="js-nabradio-control-feedback mt-2 w-100"></div>
+                      </form>
+                    {% else %}
+                      <form class="js-nabradio-control-form mb-0" method="post" action="{% url 'nabradio.control' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="selected_radio" value="{{ radio.id }}">
+
+                        <button type="submit" class="btn btn-outline-primary btn-sm js-radio-action" name="action" value="play">
+                          {% trans "Écouter" %}
+                        </button>
+
+                        <div class="js-nabradio-control-feedback mt-2 w-100"></div>
+                      </form>
+                    {% endif %}
+
                     <form class="js-nabradio-settings-form mb-0" method="post" action="{% url 'nabradio.settings' %}">
                       {% csrf_token %}
                       <input type="hidden" name="action" value="move_up">
@@ -102,9 +99,6 @@
                     <button
                       type="button"
                       class="btn btn-outline-primary btn-sm js-edit-radio-btn"
-                      data-station-id="{{ radio.id }}"
-                      data-radio-name="{{ radio.name|escape }}"
-                      data-radio-url="{{ radio.stream_url|escape }}"
                     >
                       {% trans "Éditer" %}
                     </button>
@@ -224,6 +218,35 @@
       return $(element).closest(".nab-service-settings-container, .card, body");
     }
 
+    function refreshHomeRadioWidget(response) {
+      var widget = $("#home-radio-widget");
+      if (!widget.length) {
+        return;
+      }
+
+      var title = widget.find(".js-home-radio-title");
+      var status = widget.find(".js-home-radio-status");
+      var stopButton = widget.find(".js-home-radio-stop");
+
+      if (response.selected_name) {
+        title.text(response.selected_name);
+      }
+
+      if (response.is_playing) {
+        status
+          .removeClass("badge-secondary")
+          .addClass("badge-success")
+          .text("En lecture");
+        stopButton.removeClass("d-none");
+      } else {
+        status
+          .removeClass("badge-success")
+          .addClass("badge-secondary")
+          .text("Arrêtée");
+        stopButton.addClass("d-none");
+      }
+    }
+
     $(document)
       .off("click.nabradioAction")
       .on("click.nabradioAction", ".js-radio-action", function() {
@@ -304,11 +327,7 @@
           method: "POST",
           data: payload,
           success: function(response) {
-            feedback.html(
-              '<div class="alert alert-success mb-0" role="alert">' +
-                response.message +
-              '</div>'
-            );
+            refreshHomeRadioWidget(response);
 
             var root = findRadioRoot(form);
             $.get("{% url 'nabradio.settings' %}", function(html) {
@@ -328,6 +347,32 @@
                 message +
               '</div>'
             );
+          }
+        });
+      });
+
+    $(document)
+      .off("click.homeRadioStop")
+      .on("click.homeRadioStop", ".js-home-radio-stop", function(event) {
+        event.preventDefault();
+
+        $.ajax({
+          url: "{% url 'nabradio.control' %}",
+          method: "POST",
+          data: {
+            csrfmiddlewaretoken: $("input[name='csrfmiddlewaretoken']").first().val(),
+            action: "stop",
+            selected_radio: "{{ selected_station_id|default:'' }}"
+          },
+          success: function(response) {
+            refreshHomeRadioWidget(response);
+
+            var root = $(".nab-service-settings-container[data-service='nabradio']");
+            if (root.length) {
+              $.get("{% url 'nabradio.settings' %}", function(html) {
+                root.html(html);
+              });
+            }
           }
         });
       });

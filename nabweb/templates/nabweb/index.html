@@ -47,16 +47,52 @@
           <div class="nab-section-head">
             <h2 class="nab-section-title">{% trans "Services actifs" %}</h2>
             <p class="nab-section-text">
-              {% trans "Liste rapide des modules disponibles sur votre Nabaztag." %}
+              {% trans "Accès rapide aux services principaux." %}
             </p>
           </div>
 
           <div class="nab-service-list">
-            {% for service in services %}
-              <div class="nab-service-item">
-                <span class="nab-service-dot"></span>
-                <span class="nab-service-name">{{ service }}</span>
+            <div class="nab-service-item" id="home-radio-widget">
+              <div class="flex-grow-1">
+                <div class="font-weight-bold">
+                  {% trans "Radio" %} :
+                  <span class="js-home-radio-title">
+                    {% if radio_status.selected_name %}
+                      {{ radio_status.selected_name }}
+                    {% else %}
+                      {% trans "Aucune station" %}
+                    {% endif %}
+                  </span>
+                </div>
+                <div class="mt-2">
+                  {% if radio_status.is_playing %}
+                    <span class="badge badge-success js-home-radio-status">{% trans "En lecture" %}</span>
+                  {% else %}
+                    <span class="badge badge-secondary js-home-radio-status">{% trans "Arrêtée" %}</span>
+                  {% endif %}
+                </div>
               </div>
+
+              <div class="ml-lg-3 mt-3 mt-lg-0">
+                <form class="js-home-radio-stop-form mb-0">
+                  {% csrf_token %}
+                  <button
+                    type="button"
+                    class="btn btn-outline-danger btn-sm js-home-radio-stop {% if not radio_status.is_playing %}d-none{% endif %}"
+                  >
+                    {% trans "Stop" %}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {% for service in services %}
+              {% if service != "nabradio" %}
+                <div class="nab-service-item">
+                  <span class="nab-service-dot"></span>
+                  <span class="nab-service-name">{{ service }}</span>
+                </div>
+              {% endif %}
             {% empty %}
               <div class="nab-empty-state">
                 {% trans "Aucun service détecté." %}
