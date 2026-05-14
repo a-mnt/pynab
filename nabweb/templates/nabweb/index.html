@@ -35,8 +35,12 @@
             </div>
 
             <div class="nab-status-item">
-              <span class="nab-status-label">{% trans "Accès système" %}</span>
-              <span class="nab-status-value">{% trans "Consulter la page Système" %}</span>
+              <span class="nab-status-label">{% trans "Levé depuis" %}</span>
+              <span class="nab-status-value">{% if uptime %}
+                  {{ uptime|timesince }}
+                {% else %}
+                  {% trans "Inconnu" %}
+                {% endif %}</span>
             </div>
           </div>
         </div>
