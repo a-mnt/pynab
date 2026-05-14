@@ -145,8 +145,16 @@ class NabWebView(BaseView):
         context = super().get_context()
         context["services"] = BaseView.get_services("home")
         context["radio_status"] = self.get_radio_status_safe()
+        context["uptime"] = self.get_uptime()
         return context
-    
+
+    def get_uptime(self):
+        try:
+            with open("/proc/uptime", "r") as uptime_f:
+                return int(float(uptime_f.readline().split()[0]))
+        except FileNotFoundError:
+            return 0
+  
     def get_radio_status_safe(self):
         try:
             return get_radio_status()
