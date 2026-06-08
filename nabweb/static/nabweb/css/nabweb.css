@@ -10,7 +10,7 @@ body.nab-body {
   color: #1f2937;
   font-size: 16px;
   line-height: 1.5;
-  padding-bottom: 110px;
+  padding-bottom: 24px;
 }
 
 a {
@@ -300,19 +300,20 @@ a.help-link:hover {
 .nab-bottom-nav {
   position: fixed;
   left: 50%;
+  top: 90px;
   transform: translateX(-50%);
-  bottom: 16px;
   z-index: 1050;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 0;
-  max-width: 320px;
+  max-width: 660px;
   width: calc(100% - 32px);
-  background: rgba(255, 255, 255, 0.92);
+  background: #f7f7f7;
   border: none;
-  border-radius: 28px;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15), 0 0 1px rgba(0, 0, 0, 0.05);
-  backdrop-filter: blur(20px);
+  border-radius: 48px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  padding: 12px;
+  backdrop-filter: blur(10px);
 }
 
 .nab-bottom-link {
@@ -320,17 +321,20 @@ a.help-link:hover {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-height: 68px;
+  gap: 8px;
+  min-height: 80px;
   text-decoration: none !important;
-  color: #6b7280;
-  font-size: 0.82rem;
+  color: #667085;
+  font-size: 0.88rem;
   font-weight: 600;
+  border-radius: 40px;
+  transition: all 0.2s ease;
 }
 
 .nab-bottom-link.active {
-  color: #3341b5;
-  background: #eef2ff;
+  color: #f06464;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 12px rgba(240, 100, 100, 0.12);
 }
 
 .nab-bottom-icon {
@@ -422,7 +426,7 @@ select:focus {
 
 @media (max-width: 575.98px) {
   body.nab-body {
-    padding-bottom: 90px;
+    padding-bottom: 24px;
   }
 
   .nab-container {
@@ -479,9 +483,15 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .nab-bottom-nav {
+    max-width: calc(100% - 32px);
+    top: 70px;
+  }
+
   .nab-bottom-link {
-    min-height: 64px;
+    min-height: 72px;
     font-size: 0.76rem;
+    gap: 6px;
   }
 }
 
