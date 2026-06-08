@@ -893,11 +893,16 @@ class NabWebWakeupView(View):
                 "wakeup",
                 NabWebWakeupView.WAKEUP_TIMEOUT,
             )
-            return {"status": "ok", "result": packet}
+            return {"status": packet.get("status", "ok")}
         except asyncio.TimeoutError:
             return {
                 "status": "error",
-                "message": "Communication with Nabd timed out (wakeup).",
+                "message": "Timeout lors de la communication avec Nabd.",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Erreur: {str(e)}",
             }
 
     def post(self, request, *args, **kwargs):
@@ -925,11 +930,16 @@ class NabWebSleepView(View):
                 "sleep",
                 NabWebSleepView.SLEEP_TIMEOUT,
             )
-            return {"status": "ok", "result": packet}
+            return {"status": packet.get("status", "ok")}
         except asyncio.TimeoutError:
             return {
                 "status": "error",
-                "message": "Communication with Nabd timed out (sleep).",
+                "message": "Timeout lors de la communication avec Nabd.",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Erreur: {str(e)}",
             }
 
     def post(self, request, *args, **kwargs):

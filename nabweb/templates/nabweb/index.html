@@ -170,20 +170,55 @@
       const wakeupBtn = document.querySelector('.js-home-wakeup');
       const sleepBtn = document.querySelector('.js-home-sleep');
 
+      function getCsrfToken() {
+        let token = null;
+        if (document.cookie && document.cookie !== '') {
+          const cookies = document.cookie.split(';');
+          for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === ('csrftoken=')) {
+              token = decodeURIComponent(cookie.substring(10));
+              break;
+            }
+          }
+        }
+        if (!token) {
+          token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+        }
+        return token;
+      }
+
+      const csrftoken = getCsrfToken();
+
       if (wakeupBtn) {
         wakeupBtn.addEventListener('click', function(e) {
           e.preventDefault();
-          fetch('/wakeup', {method: 'POST'})
-            .then(response => response.json())
+          wakeupBtn.disabled = true;
+          fetch('/wakeup', {
+            method: 'POST',
+            headers: {
+              'X-CSRFToken': csrftoken
+            }
+          })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+              return response.json();
+            })
             .then(data => {
               if (data.status === 'ok') {
                 $.bootstrapGrowl('{% trans "Lapin réveillé" %}', {type: 'success'});
               } else {
-                $.bootstrapGrowl('{% trans "Erreur" %}: ' + data.message, {type: 'danger'});
+                $.bootstrapGrowl('{% trans "Erreur" %}: ' + (data.message || 'Inconnue'), {type: 'danger'});
               }
             })
-            .catch(() => {
-              $.bootstrapGrowl('{% trans "Erreur de communication" %}', {type: 'danger'});
+            .catch((error) => {
+              console.error('Wakeup error:', error);
+              $.bootstrapGrowl('{% trans "Erreur de communication" %}: ' + error.message, {type: 'danger'});
+            })
+            .finally(() => {
+              wakeupBtn.disabled = false;
             });
         });
       }
@@ -191,17 +226,32 @@
       if (sleepBtn) {
         sleepBtn.addEventListener('click', function(e) {
           e.preventDefault();
-          fetch('/sleep', {method: 'POST'})
-            .then(response => response.json())
+          sleepBtn.disabled = true;
+          fetch('/sleep', {
+            method: 'POST',
+            headers: {
+              'X-CSRFToken': csrftoken
+            }
+          })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+              return response.json();
+            })
             .then(data => {
               if (data.status === 'ok') {
                 $.bootstrapGrowl('{% trans "Lapin endormi" %}', {type: 'success'});
               } else {
-                $.bootstrapGrowl('{% trans "Erreur" %}: ' + data.message, {type: 'danger'});
+                $.bootstrapGrowl('{% trans "Erreur" %}: ' + (data.message || 'Inconnue'), {type: 'danger'});
               }
             })
-            .catch(() => {
-              $.bootstrapGrowl('{% trans "Erreur de communication" %}', {type: 'danger'});
+            .catch((error) => {
+              console.error('Sleep error:', error);
+              $.bootstrapGrowl('{% trans "Erreur de communication" %}: ' + error.message, {type: 'danger'});
+            })
+            .finally(() => {
+              sleepBtn.disabled = false;
             });
         });
       }
