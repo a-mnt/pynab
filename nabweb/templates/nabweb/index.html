@@ -116,6 +116,14 @@
           </div>
 
           <div class="nab-action-grid">
+            <button class="btn btn-success nab-action-btn js-home-wakeup" type="button">
+              {% trans "Réveiller" %}
+            </button>
+
+            <button class="btn btn-warning nab-action-btn js-home-sleep" type="button">
+              {% trans "Endormir" %}
+            </button>
+
             <a class="btn btn-primary nab-action-btn" href="/services/">
               {% trans "Démarrer" %}
             </a>
@@ -156,4 +164,47 @@
       </div>
     </div>
   </section>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const wakeupBtn = document.querySelector('.js-home-wakeup');
+      const sleepBtn = document.querySelector('.js-home-sleep');
+
+      if (wakeupBtn) {
+        wakeupBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          fetch('/wakeup', {method: 'POST'})
+            .then(response => response.json())
+            .then(data => {
+              if (data.status === 'ok') {
+                $.bootstrapGrowl('{% trans "Lapin réveillé" %}', {type: 'success'});
+              } else {
+                $.bootstrapGrowl('{% trans "Erreur" %}: ' + data.message, {type: 'danger'});
+              }
+            })
+            .catch(() => {
+              $.bootstrapGrowl('{% trans "Erreur de communication" %}', {type: 'danger'});
+            });
+        });
+      }
+
+      if (sleepBtn) {
+        sleepBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          fetch('/sleep', {method: 'POST'})
+            .then(response => response.json())
+            .then(data => {
+              if (data.status === 'ok') {
+                $.bootstrapGrowl('{% trans "Lapin endormi" %}', {type: 'success'});
+              } else {
+                $.bootstrapGrowl('{% trans "Erreur" %}: ' + data.message, {type: 'danger'});
+              }
+            })
+            .catch(() => {
+              $.bootstrapGrowl('{% trans "Erreur de communication" %}', {type: 'danger'});
+            });
+        });
+      }
+    });
+  </script>
 {% endblock %}

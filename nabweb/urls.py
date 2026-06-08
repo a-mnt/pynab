@@ -15,6 +15,7 @@ from .views import (
     NabWebRfidWriteView,
     NabWebServicesView,
     NabWebShutdownView,
+    NabWebSleepView,
     NabWebSytemInfoView,
     NabWebUpgradeCheckNowView,
     NabWebUpgradeNowView,
@@ -22,6 +23,7 @@ from .views import (
     NabWebUpgradeStatusView,
     NabWebUpgradeView,
     NabWebView,
+    NabWebWakeupView,
 )
 
 urlpatterns: List[Union[URLResolver, URLPattern]] = [
@@ -64,6 +66,16 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
         "system-info/shutdown/<str:mode>",
         NabWebShutdownView.as_view(),
         name="nabweb.shutdown",
+    ),
+    path(
+        "wakeup",
+        NabWebWakeupView.as_view(),
+        name="nabweb.wakeup",
+    ),
+    path(
+        "sleep",
+        NabWebSleepView.as_view(),
+        name="nabweb.sleep",
     ),
 
     # --- Upgrade ---

@@ -871,3 +871,67 @@ class NabWebShutdownView(View):
         mode = kwargs.get("mode")
         shutdown_result = async_to_sync(self.os_shutdown)(mode)
         return JsonResponse(shutdown_result)
+
+
+class NabWebWakeupView(View):
+    WAKEUP_TIMEOUT = 5.0
+
+    async def wakeup(self):
+        return await NabdConnection.transaction(self._do_wakeup)
+
+    async def _do_wakeup(self, reader, writer):
+        try:
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "wakeup",
+                    "request_id": "wakeup",
+                },
+            )
+            packet = await NabdConnection.wait_for_response(
+                reader,
+                "wakeup",
+                NabWebWakeupView.WAKEUP_TIMEOUT,
+            )
+            return {"status": "ok", "result": packet}
+        except asyncio.TimeoutError:
+            return {
+                "status": "error",
+                "message": "Communication with Nabd timed out (wakeup).",
+            }
+
+    def post(self, request, *args, **kwargs):
+        wakeup_result = async_to_sync(self.wakeup)()
+        return JsonResponse(wakeup_result)
+
+
+class NabWebSleepView(View):
+    SLEEP_TIMEOUT = 5.0
+
+    async def sleep(self):
+        return await NabdConnection.transaction(self._do_sleep)
+
+    async def _do_sleep(self, reader, writer):
+        try:
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "sleep",
+                    "request_id": "sleep",
+                },
+            )
+            packet = await NabdConnection.wait_for_response(
+                reader,
+                "sleep",
+                NabWebSleepView.SLEEP_TIMEOUT,
+            )
+            return {"status": "ok", "result": packet}
+        except asyncio.TimeoutError:
+            return {
+                "status": "error",
+                "message": "Communication with Nabd timed out (sleep).",
+            }
+
+    def post(self, request, *args, **kwargs):
+        sleep_result = async_to_sync(self.sleep)()
+        return JsonResponse(sleep_result)
