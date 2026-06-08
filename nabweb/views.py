@@ -881,6 +881,12 @@ class NabWebWakeupView(View):
 
     async def _do_wakeup(self, reader, writer):
         try:
+            from nabd.i18n import Config
+            config = Config.load()
+            config.sleep_wakeup_override = False
+            config.save()
+            await self._notify_config_update(reader, writer)
+
             await NabdConnection.send_packet(
                 writer,
                 {
@@ -904,6 +910,19 @@ class NabWebWakeupView(View):
                 "status": "error",
                 "message": f"Erreur: {str(e)}",
             }
+
+    async def _notify_config_update(self, reader, writer):
+        try:
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "config-update",
+                    "service": "nabclockd",
+                    "slot": "sleep_wakeup_override",
+                },
+            )
+        except Exception:
+            pass
 
     def post(self, request, *args, **kwargs):
         wakeup_result = async_to_sync(self.wakeup)()
@@ -930,6 +949,11 @@ class NabWebSleepView(View):
                 "sleep",
                 NabWebSleepView.SLEEP_TIMEOUT,
             )
+            from nabd.i18n import Config
+            config = Config.load()
+            config.sleep_wakeup_override = True
+            config.save()
+            await self._notify_config_update(reader, writer)
             return {"status": packet.get("status", "ok")}
         except asyncio.TimeoutError:
             return {
@@ -941,6 +965,19 @@ class NabWebSleepView(View):
                 "status": "error",
                 "message": f"Erreur: {str(e)}",
             }
+
+    async def _notify_config_update(self, reader, writer):
+        try:
+            await NabdConnection.send_packet(
+                writer,
+                {
+                    "type": "config-update",
+                    "service": "nabclockd",
+                    "slot": "sleep_wakeup_override",
+                },
+            )
+        except Exception:
+            pass
 
     def post(self, request, *args, **kwargs):
         sleep_result = async_to_sync(self.sleep)()
