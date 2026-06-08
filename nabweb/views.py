@@ -8,7 +8,7 @@ import platform
 import re
 import subprocess
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from django.apps import apps
 from django.conf import settings
 from django.core.cache import cache
@@ -881,10 +881,7 @@ class NabWebWakeupView(View):
 
     async def _do_wakeup(self, reader, writer):
         try:
-            from nabd.i18n import Config
-            config = Config.load()
-            config.sleep_wakeup_override = False
-            config.save()
+            await sync_to_async(self._update_sleep_override)(False)
             await self._notify_config_update(reader, writer)
 
             await NabdConnection.send_packet(
@@ -910,6 +907,12 @@ class NabWebWakeupView(View):
                 "status": "error",
                 "message": f"Erreur: {str(e)}",
             }
+
+    @staticmethod
+    def _update_sleep_override(value):
+        config = Config.load()
+        config.sleep_wakeup_override = value
+        config.save()
 
     async def _notify_config_update(self, reader, writer):
         try:
@@ -949,10 +952,7 @@ class NabWebSleepView(View):
                 "sleep",
                 NabWebSleepView.SLEEP_TIMEOUT,
             )
-            from nabd.i18n import Config
-            config = Config.load()
-            config.sleep_wakeup_override = True
-            config.save()
+            await sync_to_async(self._update_sleep_override)(True)
             await self._notify_config_update(reader, writer)
             return {"status": packet.get("status", "ok")}
         except asyncio.TimeoutError:
@@ -965,6 +965,12 @@ class NabWebSleepView(View):
                 "status": "error",
                 "message": f"Erreur: {str(e)}",
             }
+
+    @staticmethod
+    def _update_sleep_override(value):
+        config = Config.load()
+        config.sleep_wakeup_override = value
+        config.save()
 
     async def _notify_config_update(self, reader, writer):
         try:
