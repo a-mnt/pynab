@@ -9,6 +9,7 @@ from django.views.generic import TemplateView
 
 from .views import (
     NabWebHardwareTestView,
+    NabWebLogViewerView,
     NabWebRfidReadView,
     NabWebRfidView,
     NabWebRfidWriteView,
@@ -53,6 +54,11 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
         "system-info/",
         NabWebSytemInfoView.as_view(),
         name="nabweb.system",
+    ),
+    path(
+        "system-info/logs",
+        NabWebLogViewerView.as_view(),
+        name="nabweb.logs",
     ),
     path(
         "system-info/shutdown/<str:mode>",

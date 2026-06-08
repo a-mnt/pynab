@@ -525,3 +525,51 @@ select:focus {
 .nab-service-settings-container .form-control[type="range"] {
   height: 24px !important;
 }
+
+/* Log viewer styles */
+.nab-log-viewer {
+  display: flex;
+  flex-direction: column;
+}
+
+.nab-log-selector {
+  margin-bottom: 1rem;
+}
+
+.nab-log-selector label {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  display: block;
+}
+
+.nab-log-selector select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  background-color: #ffffff;
+}
+
+.nab-log-display {
+  background-color: #1f2937;
+  color: #d1d5db;
+  padding: 1rem;
+  border-radius: 0.375rem;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: "Monaco", "Courier New", monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.nab-log-display pre {
+  margin: 0;
+  color: #d1d5db;
+}
+
+.nab-log-display .text-muted {
+  color: #6b7280;
+}

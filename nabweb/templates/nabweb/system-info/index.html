@@ -141,19 +141,36 @@
             </p>
           </div>
 
-          <div class="nab-alert-list">
-            <div class="nab-alert-item">
-              <span class="nab-alert-badge">{% trans "Logs" %}</span>
-              <span class="nab-alert-text">
-                {% trans "Aucun visualiseur dédié n’est encore présent dans l’interface web. Utilisez SSH pour consulter les journaux système et les logs de mise à jour." %}
-              </span>
-            </div>
-          </div>
+          {% if available_logs %}
+            <div class="nab-log-viewer">
+              <div class="nab-log-selector mb-3">
+                <label for="log-file-select" class="form-label">
+                  {% trans "Sélectionner un fichier de log:" %}
+                </label>
+                <select id="log-file-select" class="form-control">
+                  <option value="">{% trans "Choisir un fichier..." %}</option>
+                  {% for log_file in available_logs %}
+                    <option value="{{ log_file }}">
+                      {{ log_file|slice:"5:" }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
 
-          <div class="mt-3">
-            <code>/tmp/pynab-upgrade-stdout.log</code><br>
-            <code>/tmp/pynab-upgrade-stderr.log</code>
-          </div>
+              <div id="log-display" class="nab-log-display">
+                <p class="text-muted">{% trans "Sélectionnez un fichier pour afficher son contenu" %}</p>
+              </div>
+            </div>
+          {% else %}
+            <div class="nab-alert-list">
+              <div class="nab-alert-item">
+                <span class="nab-alert-badge">{% trans "Info" %}</span>
+                <span class="nab-alert-text">
+                  {% trans "Aucun fichier de log disponible actuellement." %}
+                </span>
+              </div>
+            </div>
+          {% endif %}
         </div>
       </div>
 
@@ -249,6 +266,41 @@
               delay: 4000
             });
             button.prop("disabled", false).text(originalText);
+          }
+        });
+      });
+
+      // Log viewer functionality
+      $("#log-file-select").on("change", function() {
+        var logFile = $(this).val();
+        var logDisplay = $("#log-display");
+
+        if (!logFile) {
+          logDisplay.html("<p class='text-muted'>{% trans 'Sélectionnez un fichier pour afficher son contenu' %}</p>");
+          return;
+        }
+
+        logDisplay.html("<p class='text-muted'>{% trans 'Chargement...' %}</p>");
+
+        $.ajax({
+          url: "{% url 'nabweb.logs' %}",
+          method: "POST",
+          headers: {
+            "X-CSRFToken": "{{ csrf_token }}"
+          },
+          data: {
+            file: logFile
+          },
+          success: function(response) {
+            if (response.status === "ok") {
+              var content = $("<pre></pre>").text(response.content);
+              logDisplay.empty().append(content);
+            } else {
+              logDisplay.html("<p class='text-danger'>{% trans 'Erreur: ' %}" + (response.message || "{% trans 'Impossible de charger le fichier' %}") + "</p>");
+            }
+          },
+          error: function() {
+            logDisplay.html("<p class='text-danger'>{% trans 'Erreur lors du chargement du fichier de log.' %}</p>");
           }
         });
       });

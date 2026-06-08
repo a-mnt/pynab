@@ -396,6 +396,11 @@ class NabWebRfidWriteView(View):
 
 
 class NabWebSytemInfoView(BaseView):
+    LOG_FILES = [
+        "/tmp/pynab-upgrade-stdout.log",
+        "/tmp/pynab-upgrade-stderr.log",
+    ]
+
     def template_name(self):
         return "nabweb/system-info/index.html"
 
@@ -459,13 +464,53 @@ class NabWebSytemInfoView(BaseView):
     def get_pi_info(self):
         return {"model": hardware.device_model()}
 
+    def get_available_logs(self):
+        logs = []
+        for log_file in self.LOG_FILES:
+            if os.path.isfile(log_file):
+                logs.append(log_file)
+        return logs
+
     def get_context(self):
         context = super().get_context()
         gestalt = async_to_sync(self.query_gestalt)()
         context["gestalt"] = gestalt
         context["os"] = self.get_os_info()
         context["pi"] = self.get_pi_info()
+        context["available_logs"] = self.get_available_logs()
         return context
+
+
+class NabWebLogViewerView(View):
+    ALLOWED_LOGS = [
+        "/tmp/pynab-upgrade-stdout.log",
+        "/tmp/pynab-upgrade-stderr.log",
+    ]
+
+    def post(self, request):
+        log_file = request.POST.get("file")
+
+        if not log_file or log_file not in self.ALLOWED_LOGS:
+            return JsonResponse(
+                {"status": "error", "message": "Invalid log file"},
+                status=400,
+            )
+
+        try:
+            if os.path.isfile(log_file):
+                with open(log_file, "r") as f:
+                    content = f.read()
+                return JsonResponse({"status": "ok", "content": content})
+            else:
+                return JsonResponse(
+                    {"status": "error", "message": "File not found"},
+                    status=404,
+                )
+        except Exception as e:
+            return JsonResponse(
+                {"status": "error", "message": str(e)},
+                status=500,
+            )
 
 
 class NabWebHardwareTestView(View):
