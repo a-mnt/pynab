@@ -151,9 +151,10 @@ class NabWebView(BaseView):
     def get_uptime(self):
         try:
             with open("/proc/uptime", "r") as uptime_f:
-                return int(float(uptime_f.readline().split()[0]))
+                uptime_seconds = int(float(uptime_f.readline().split()[0]))
+                return datetime.datetime.now() - datetime.timedelta(seconds=uptime_seconds)
         except FileNotFoundError:
-            return 0
+            return None
   
     def get_radio_status_safe(self):
         try:
