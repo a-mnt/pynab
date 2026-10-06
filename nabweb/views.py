@@ -7,7 +7,9 @@ import json
 import os
 import platform
 import re
+import signal
 import subprocess
+import time
 
 from asgiref.sync import async_to_sync, sync_to_async
 from django.apps import apps
@@ -999,17 +1001,106 @@ class NabWebShutdownView(View):
         return JsonResponse(shutdown_result)
 
 
+CLOCK_PIDFILE = "/run/nabclockd.pid"
+CLOCK_SYNCHRONIZED_FILE = "/run/systemd/timesync/synchronized"
+
+
+def _clock_daemon_active():
+    """
+    Tell whether nabclockd is running and managing sleep: it only does so
+    once the system clock has been synchronized since boot (see
+    NabClockd.synchronized_since_boot).
+    """
+    try:
+        with open(CLOCK_PIDFILE, "r") as pid_f:
+            os.kill(int(pid_f.read().strip()), 0)
+        with open("/proc/uptime", "r") as uptime_f:
+            boot_time = time.time() - float(uptime_f.readline().split()[0])
+        return os.stat(CLOCK_SYNCHRONIZED_FILE).st_mtime > boot_time
+    except (OSError, ValueError):
+        return False
+
+
+def _set_sleep_override(asleep):
+    """
+    Record that the user wants the rabbit asleep (True) or awake (False)
+    whatever the schedule says, and tell nabclockd.
+
+    nabclockd is the service that puts the rabbit to sleep and wakes it up
+    according to the schedule. Without this, it undoes at once what the
+    website asked for: the rabbit sent to sleep during its waking hours is
+    woken up immediately. The override stays until the schedule agrees.
+    """
+    from nabclockd.models import Config as ClockConfig
+
+    config = ClockConfig.load()
+    config.sleep_wakeup_override = asleep
+    config.save(update_fields=["sleep_wakeup_override"])
+    try:
+        with open(CLOCK_PIDFILE, "r") as pid_f:
+            os.kill(int(pid_f.read().strip()), signal.SIGUSR1)
+    except (OSError, ValueError):
+        pass
+
+
+def _stop_radio():
+    """
+    A radio stream never ends by itself, and nabd only falls asleep once
+    it has nothing left to play.
+    """
+    from nabradio import control
+    from nabradio.views import _signal_radio_daemon
+
+    if control.get_desired()[0]:
+        control.set_playing(False)
+        _signal_radio_daemon()
+
+
+async def _wait_for_state(reader, wanted, timeout):
+    """
+    Read nabd packets until its state satisfies `wanted` (a function).
+    Return True if it did before `timeout` seconds.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            line = await asyncio.wait_for(reader.readline(), remaining)
+        except asyncio.TimeoutError:
+            return False
+        if line == b"":
+            return False
+        try:
+            packet = json.loads(line.decode("utf8"))
+        except ValueError:
+            continue
+        if packet.get("type") == "state" and wanted(packet.get("state")):
+            return True
+
+
 class NabWebWakeupView(View):
     WAKEUP_TIMEOUT = 5.0
+    # Time given to nabclockd to wake the rabbit up by itself.
+    CLOCK_TIMEOUT = 8.0
 
     async def wakeup(self):
         return await NabdConnection.transaction(self._do_wakeup)
 
     async def _do_wakeup(self, reader, writer):
         try:
-            await sync_to_async(self._update_sleep_override)(False)
-            await self._notify_config_update(reader, writer)
+            clock_active = await sync_to_async(_clock_daemon_active)()
+            await sync_to_async(_set_sleep_override)(False)
 
+            # nabd first tells its current state, then every change.
+            if clock_active and await _wait_for_state(
+                reader, lambda state: state != "asleep", self.CLOCK_TIMEOUT
+            ):
+                return {"status": "ok"}
+
+            # nabclockd is not there to do it. Sending wakeup to a rabbit
+            # already awake is harmless.
             await NabdConnection.send_packet(
                 writer,
                 {
@@ -1034,38 +1125,40 @@ class NabWebWakeupView(View):
                 "message": f"Erreur: {str(e)}",
             }
 
-    @staticmethod
-    def _update_sleep_override(value):
-        config = Config.load()
-        config.sleep_wakeup_override = value
-        config.save()
-
-    async def _notify_config_update(self, reader, writer):
-        try:
-            await NabdConnection.send_packet(
-                writer,
-                {
-                    "type": "config-update",
-                    "service": "nabclockd",
-                    "slot": "sleep_wakeup_override",
-                },
-            )
-        except Exception:
-            pass
-
     def post(self, request, *args, **kwargs):
         wakeup_result = async_to_sync(self.wakeup)()
         return JsonResponse(wakeup_result)
 
 
 class NabWebSleepView(View):
-    SLEEP_TIMEOUT = 5.0
+    SLEEP_TIMEOUT = 10.0
+    # Time given to nabclockd to put the rabbit to sleep: the radio jingle
+    # and the sleep sound may have to end first.
+    CLOCK_TIMEOUT = 20.0
 
     async def sleep(self):
         return await NabdConnection.transaction(self._do_sleep)
 
     async def _do_sleep(self, reader, writer):
         try:
+            await sync_to_async(_stop_radio)()
+            clock_active = await sync_to_async(_clock_daemon_active)()
+            await sync_to_async(_set_sleep_override)(True)
+
+            if clock_active:
+                # nabclockd now puts the rabbit to sleep itself. A second
+                # sleep request here would stay in nabd's queue and send
+                # the rabbit back to sleep at its next wake-up.
+                if await _wait_for_state(
+                    reader, lambda state: state == "asleep", self.CLOCK_TIMEOUT
+                ):
+                    return {"status": "ok"}
+                return {
+                    "status": "error",
+                    "message": "Le lapin n'a pas confirmé qu'il dort.",
+                }
+
+            # nabclockd is not there to do it: ask nabd directly.
             await NabdConnection.send_packet(
                 writer,
                 {
@@ -1078,8 +1171,6 @@ class NabWebSleepView(View):
                 "sleep",
                 NabWebSleepView.SLEEP_TIMEOUT,
             )
-            await sync_to_async(self._update_sleep_override)(True)
-            await self._notify_config_update(reader, writer)
             return {"status": packet.get("status", "ok")}
         except asyncio.TimeoutError:
             return {
@@ -1091,25 +1182,6 @@ class NabWebSleepView(View):
                 "status": "error",
                 "message": f"Erreur: {str(e)}",
             }
-
-    @staticmethod
-    def _update_sleep_override(value):
-        config = Config.load()
-        config.sleep_wakeup_override = value
-        config.save()
-
-    async def _notify_config_update(self, reader, writer):
-        try:
-            await NabdConnection.send_packet(
-                writer,
-                {
-                    "type": "config-update",
-                    "service": "nabclockd",
-                    "slot": "sleep_wakeup_override",
-                },
-            )
-        except Exception:
-            pass
 
     def post(self, request, *args, **kwargs):
         sleep_result = async_to_sync(self.sleep)()

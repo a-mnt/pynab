@@ -258,6 +258,60 @@ class TestUpgradeProgress(TestCase):
         self.assertEqual(response.content.decode().count("data-step="), 15)
 
 
+class TestSleepOverride(TestCase):
+    def test_override_is_saved_for_nabclockd(self):
+        """
+        nabclockd wakes the rabbit up (or sends it back to sleep) unless it
+        is told the user decided otherwise: the override must be saved in
+        its own configuration.
+        """
+        from nabclockd.models import Config as ClockConfig
+
+        self.assertIsNone(ClockConfig.load().sleep_wakeup_override)
+        with mock.patch("nabweb.views.os.kill") as kill_mock:
+            with mock.patch(
+                "builtins.open", mock.mock_open(read_data="4242\n")
+            ):
+                views._set_sleep_override(True)
+        self.assertTrue(ClockConfig.load().sleep_wakeup_override)
+        # nabclockd is told to reload its configuration.
+        kill_mock.assert_called_once_with(4242, views.signal.SIGUSR1)
+
+        views._set_sleep_override(False)
+        self.assertFalse(ClockConfig.load().sleep_wakeup_override)
+
+    def test_clock_daemon_not_running(self):
+        with mock.patch.object(views, "CLOCK_PIDFILE", "/nonexistent/pid"):
+            self.assertFalse(views._clock_daemon_active())
+
+    def test_clock_daemon_running_but_clock_not_synchronized(self):
+        handle, pidfile = tempfile.mkstemp()
+        os.write(handle, str(os.getpid()).encode())
+        os.close(handle)
+        self.addCleanup(os.remove, pidfile)
+        with mock.patch.object(views, "CLOCK_PIDFILE", pidfile):
+            with mock.patch.object(
+                views, "CLOCK_SYNCHRONIZED_FILE", "/nonexistent/synchronized"
+            ):
+                self.assertFalse(views._clock_daemon_active())
+            with mock.patch.object(views, "CLOCK_SYNCHRONIZED_FILE", pidfile):
+                self.assertTrue(views._clock_daemon_active())
+
+    def test_stop_radio_before_sleep(self):
+        from nabradio import control
+
+        control.status_payload()
+        with mock.patch(
+            "nabradio.views._signal_radio_daemon", return_value=True
+        ) as signal_mock:
+            views._stop_radio()
+            signal_mock.assert_not_called()
+            control.set_playing(True)
+            views._stop_radio()
+            signal_mock.assert_called_once()
+        self.assertFalse(control.get_desired()[0])
+
+
 class TestNabdClientBase(TestCase):
     async def mock_nabd_service_handler(self, reader, writer):
         self.service_writer = writer

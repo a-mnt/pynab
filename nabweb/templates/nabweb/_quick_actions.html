@@ -27,6 +27,7 @@
       data-url="{% url 'nabweb.wakeup' %}"
       data-title="{% trans 'Réveiller le lapin ?' %}"
       data-text="{% trans 'Le lapin se réveille et reprend ses services.' %}"
+      data-wait="{% trans 'Le lapin se réveille…' %}"
       data-done="{% trans 'Lapin réveillé' %}"
       data-reload="1"
     >
@@ -39,6 +40,7 @@
       data-url="{% url 'nabweb.sleep' %}"
       data-title="{% trans 'Endormir le lapin ?' %}"
       data-text="{% trans 'Le lapin s’endort : plus de son ni de lumière jusqu’à son réveil.' %}"
+      data-wait="{% trans 'Le lapin s’endort…' %}"
       data-done="{% trans 'Lapin endormi' %}"
       data-reload="1"
     >
@@ -116,6 +118,10 @@
       }
       pending = null;
       button.prop("disabled", true);
+      if (button.data("wait")) {
+        // Falling asleep can take a few seconds (sounds end first).
+        notify(button.data("wait"), "info");
+      }
 
       $.ajax({
         url: button.data("url"),
