@@ -8,8 +8,9 @@ utterances:
   - tu me donnerais la météo pour [date:snips/datetime](aujourd'hui)
   - tu peux me donner la météo
   - est-ce que tu peux me donner la météo
-  - est-ce que je peux sortir en t-shirt
+  - est-ce que je peux sortir en t-shirt [date:snips/datetime](aujourd'hui)
   - est-ce que je peux mettre un short [date:snips/datetime](aujourd'hui)
+  - est-ce que je peux mettre un chemise [date:snips/datetime](aujourd'hui)
   - est-ce que j'aurai besoin d'un parapluie [date:snips/datetime](aujourd'hui)
   - donne-moi les prévisions météos pour [date:snips/datetime](demain)
   - quel temps fait-il [date:snips/datetime](aujourd'hui)

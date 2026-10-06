@@ -29,7 +29,7 @@ public <control> =
     | est-ce ( qu'il | que il ) ( pleuvra | va pleuvoir | ( va faire | fera ) ( chaud | froid ) | va faire beau | y aura des éclaircies ) [<date>]
     | est-ce qu'il ( pleut | fait chaud | fait froid ) [<date>]
     | est-ce que ( j'ai | j'aurai ) besoin d'un ( parapluie | pull | imper | k-way | imperméable | blouson ) [<date>]
-    | est-ce que je peux sortir en t-shirt | chemise | short [<date>]
+    | est-ce que je peux sortir en ( t-shirt | chemise | short ) [<date>]
     | quel temps ( fera-t-il | fait-il | il ( fait | va faire ) ) [ dehors | à l'extérieur ] [<date>]
     | quelle ( est | sera ) la météo [<date>]
     | va-t-il ( faire ( beau | froid | chaud ) | neiger | pleuvoir ) [<date>]
