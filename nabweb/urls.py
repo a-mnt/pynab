@@ -14,6 +14,7 @@ from .views import (
     NabWebRfidView,
     NabWebRfidWriteView,
     NabWebServicesView,
+    NabWebSettingsView,
     NabWebShutdownView,
     NabWebSleepView,
     NabWebSytemInfoView,
@@ -34,12 +35,8 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
     # --- Services ---
     path("services/", NabWebServicesView.as_view(), name="nabweb.services"),
 
-    # --- Paramètres (NOUVEAU) ---
-    path(
-        "settings/",
-        TemplateView.as_view(template_name="nabweb/settings/index.html"),
-        name="nabweb.settings",
-    ),
+    # --- Paramètres ---
+    path("settings/", NabWebSettingsView.as_view(), name="nabweb.settings"),
 
     # --- RFID ---
     path("rfid/", NabWebRfidView.as_view(), name="nabweb.rfid"),

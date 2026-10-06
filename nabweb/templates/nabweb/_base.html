@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=5">
+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=6">
 
     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
 
@@ -62,7 +62,7 @@
         <span class="nab-bottom-label">{% trans "Système" %}</span>
       </a>
 
-      <a class="nab-bottom-link{% if request.path == '/settings/' %} active{% endif %}" href="/settings/">
+      <a class="nab-bottom-link{% if request.path == '/settings/' or request.path == '/rfid/' or '/help/' in request.path %} active{% endif %}" href="/settings/">
         <span class="nab-bottom-icon">☰</span>
         <span class="nab-bottom-label">{% trans "Paramètres" %}</span>
       </a>

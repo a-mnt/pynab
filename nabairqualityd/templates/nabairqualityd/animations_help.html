@@ -1,27 +1,25 @@
-{% extends 'nabweb/_help.html' %}
+{% extends 'nabweb/_base.html' %}
 {% load static %}
 {% load i18n %}
 
 {% block subtitle %}{% trans "Air quality" %}{% endblock %}
 {% block content %}
-     <div class="row justify-content-center">
-      <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
-        <div class="card" id="nabairqualityd-animations">
-          <div class="card-header">
-            <h5 class="card-title">{% trans "The air quality visual animations" %}</h5>
-          </div>
-
-          <div class="card-body">
-            <table>
-              <tr>
-                <td>{% trans "Bad" %}<img class="img-fluid" src="{% static "nabweb/images/air_bad.gif" %}"></td>
-                <td>{% trans "Moderate" %}<img class="img-fluid" src="{% static "nabweb/images/air_middle.gif" %}"></td>
-                <td>{% trans "Good" %}<img class="img-fluid" src="{% static "nabweb/images/air_ok.gif" %}"></td>
-              </tr>
-            </table>
-          </div>
-
-        </div>
-     </div>
+  <section class="nab-dashboard">
+    <a class="nab-back-link" href="{% url 'nabweb.help' %}">← {% trans "Nabaztag help" %}</a>
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Aide" %}</div>
+      <h1 class="nab-page-title">{% trans "The air quality visual animations" %}</h1>
     </div>
+    <div class="nab-card nab-help" id="nabairqualityd-animations">
+      <div class="table-responsive">
+        <table class="nab-help-table">
+          <tr>
+            <td>{% trans "Bad" %}<img class="img-fluid" src="{% static "nabweb/images/air_bad.gif" %}"></td>
+            <td>{% trans "Moderate" %}<img class="img-fluid" src="{% static "nabweb/images/air_middle.gif" %}"></td>
+            <td>{% trans "Good" %}<img class="img-fluid" src="{% static "nabweb/images/air_ok.gif" %}"></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </section>
 {% endblock %}

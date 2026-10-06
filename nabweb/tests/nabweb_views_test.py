@@ -40,6 +40,37 @@ class TestView(TestCase):
         self.assertTrue("current_locale" in response.context)
         self.assertEqual(response.context["current_locale"], "en_US")
 
+    def test_get_settings(self):
+        c = Client()
+        response = c.get("/settings/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.templates[0].name, "nabweb/settings/index.html"
+        )
+        self.assertEqual(response.context["current_locale"], "fr_FR")
+        self.assertTrue("locales" in response.context)
+        self.assertFalse(response.context["locale_saved"])
+        # nabd is not running in this test
+        self.assertEqual(response.context["rfid_support"]["status"], "error")
+
+    def test_post_settings_set_locale(self):
+        c = Client()
+        response = c.post("/settings/", {"locale": "en_US"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.templates[0].name, "nabweb/settings/index.html"
+        )
+        self.assertEqual(response.context["current_locale"], "en_US")
+        self.assertTrue(response.context["locale_saved"])
+
+    def test_get_help_pages(self):
+        c = Client()
+        for url in ("/help/", "/help/weather", "/help/airquality"):
+            response = c.get(url)
+            self.assertEqual(response.status_code, 200)
+            template_names = [t.name for t in response.templates]
+            self.assertTrue("nabweb/_base.html" in template_names)
+
     def test_get_rfid(self):
         c = Client()
         response = c.get("/rfid/")

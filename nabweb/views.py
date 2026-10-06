@@ -211,6 +211,34 @@ class NabWebServicesView(BaseView):
         return context
 
 
+class NabWebSettingsView(NabWebView):
+    """
+    Page Paramètres : langue, RFID / NFC et aide.
+    Hérite de NabWebView pour réutiliser l'enregistrement de la langue
+    (méthode post).
+    """
+
+    def template_name(self):
+        return "nabweb/settings/index.html"
+
+    def get_context(self):
+        # Contexte de base uniquement (langues) : pas besoin de l'état
+        # radio ni de l'uptime calculés pour l'accueil.
+        context = BaseView.get_context(self)
+        gestalt = async_to_sync(self.query_gestalt)()
+        if gestalt["status"] == "ok":
+            context["rfid_support"] = {
+                "status": "ok",
+                "available": gestalt["result"]["hardware"]["rfid"],
+            }
+        else:
+            context["rfid_support"] = gestalt
+        context["locale_saved"] = (
+            self.request.method == "POST" and "locale" in self.request.POST
+        )
+        return context
+
+
 class NabWebRfidView(BaseView):
     def template_name(self):
         return "nabweb/rfid/index.html"

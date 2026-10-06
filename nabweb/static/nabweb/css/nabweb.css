@@ -203,6 +203,91 @@ a.help-link:hover {
   color: #15803d;
 }
 
+.nab-status-warn {
+  color: #b45309;
+}
+
+/* Paramètres : cartes-liens et formulaire en ligne */
+.nab-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.nab-quick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  color: #1f2937;
+  text-decoration: none !important;
+}
+
+.nab-quick-card:hover,
+.nab-quick-card:focus {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #3341b5;
+}
+
+.nab-quick-card-title {
+  font-weight: 700;
+}
+
+.nab-quick-card-text {
+  font-size: 0.92rem;
+  color: #6b7280;
+}
+
+.nab-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.nab-inline-form .form-control {
+  flex: 1 1 200px;
+  width: auto;
+}
+
+/* Aide et sous-pages */
+.nab-back-link {
+  display: inline-block;
+  margin-bottom: 14px;
+  font-weight: 600;
+  color: #3341b5;
+}
+
+.nab-help [id] {
+  scroll-margin-top: 90px;
+}
+
+.nab-help p:last-child {
+  margin-bottom: 0;
+}
+
+.nab-help-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.nab-help-table td {
+  width: 33.33%;
+  padding: 10px;
+  text-align: center;
+  vertical-align: top;
+  border: 1px solid #e5e7eb;
+  font-weight: 600;
+}
+
+.nab-help-table img {
+  display: block;
+  margin: 8px auto 0;
+}
+
 /* Services */
 .nab-service-list {
   display: flex;

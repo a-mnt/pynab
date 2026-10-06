@@ -1,16 +1,19 @@
-{% extends 'nabweb/_help.html' %}
+{% extends 'nabweb/_base.html' %}
 {% load i18n %}
-{% block subtitle %}{% trans "Home" %}{% endblock %}
+{% block subtitle %}{% trans "Nabaztag help" %}{% endblock %}
 {% block content %}
-  <div class="jumbotron">
-    <div class="container">
-      <h1 class="display-5">{% trans "Nabaztag help" %}</h1>
-      <hr class="my-4">
+  <section class="nab-dashboard">
+    <a class="nab-back-link" href="{% url 'nabweb.settings' %}">← {% trans "Paramètres" %}</a>
+    <div class="nab-page-head">
+      <div class="nab-kicker">{% trans "Aide" %}</div>
+      <h1 class="nab-page-title">{% trans "Nabaztag help" %}</h1>
+    </div>
+    <div class="nab-card nab-help">
       <p class="lead">{% trans "On your rabbit" %}</p>
       <p>{% trans "<b>The " %}<a href='/help/weather' title='{% trans "The weather forecast visual animations" %}'>{% trans "weather forecast visual animations" %}</b></a>.</p>
       <p>{% trans "<b>The " %}<a href='/help/airquality' title='{% trans "The air quality visual animations" %}'>{% trans "air quality visual animations" %}</b></a>.</p>
       <p id="asr"><b>{% trans "Talking to the rabbit (speech recognition)" %}</b><br>{% trans "You need to push and hold the button on the rabbit's head long enough to hear a 'beep', then wait a couple of seconds and speak. When you are done just release the button." %}<br>{% trans "The speech processing is done locally and the answer should come shortly!" %}</p>
-      <p><b>{% trans "Reboot or shutdown the rabbit" %}</b><br>{% blocktrans %}You can do this cleanly by using the <kbd class="btn-warning">Reboot</kbd> or <kbd class="btn-danger">Shutdown</kbd> buttons on the <a  target='_parent' href='/system-info/'>System information</a> tab of the configuration page.{% endblocktrans %}<br>{% trans "As a last resort, you can also shutdown the rabbit by pushing its head button quickly three times in a row." %}</p>
+      <p><b>{% trans "Reboot or shutdown the rabbit" %}</b><br>{% blocktrans %}You can do this cleanly by using the <kbd class="btn-warning">Reboot</kbd> or <kbd class="btn-danger">Shutdown</kbd> buttons on the <a  href='/system-info/'>System information</a> tab of the configuration page.{% endblocktrans %}<br>{% trans "As a last resort, you can also shutdown the rabbit by pushing its head button quickly three times in a row." %}</p>
       <p><b>{% trans "Base LED pulse color" %}</b> {% trans "indicates the rabbit's network connection state" %}<br>{% blocktrans %}<span class="badge badge-pill badge-info">Fuchsia</span> means <i>all is fine</i>: rabbit has an IP address on your local network, and access to the Internet.<br><span class="badge badge-pill badge-warning">Orange</span> means <i>not so good</i>: rabbit has a local IP address, but no Internet connection (check your router).<br><span class="badge badge-pill badge-danger">Red</span> means <i>real bad</i>: rabbit has no IP address (check your WiFi access point / DHCP server).{% endblocktrans %}</p>
       <hr class="my-4">
       <p class="lead">{% trans "On the Internet" %}</p>
@@ -18,7 +21,6 @@
       <p><b>{% trans "The <a target='_blank' href='https://github.com/nabaztag2018/pynab/#readme' rel='noopener noreferrer'>GitHub repository</a>" %}</b><br>{% trans "Report bugs or contribute to the project with other developers." %}</p>
       <p><b>{% trans "<a target='_blank' href='https://twitter.com/nabaztagtagtag' rel='noopener noreferrer'>Nabaztag on Twitter</a>" %}</b></p>
       <p><b>{% trans "The <a target='_blank' href='https://www.instructables.com/member/tagtagtag/' rel='noopener noreferrer'>TagTagTag assembly instructions</a>" %}</b><br>{% trans "The open heart operation to transplant the cards into your rabbit. At this stage you probably do not need this anymore..." %}</p>
-      <hr class="my-4">
     </div>
-  </div>
+  </section>
 {% endblock %}
