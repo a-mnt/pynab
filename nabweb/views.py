@@ -2,6 +2,7 @@ import abc
 import asyncio
 import base64
 import datetime
+import fcntl
 import json
 import os
 import platform
@@ -870,21 +871,32 @@ class NabWebUpgradeStatusView(View):
 
 class NabWebUpgradeNowView(View):
     root_owner = "1000"
+    # Written by upgrade.sh and install.sh with the current step, and kept
+    # locked (flock) by the upgrade for as long as it runs.
+    UPGRADE_FILE = "/tmp/pynab.upgrade"
+
+    @classmethod
+    def current_step(cls):
+        """
+        Return the step the upgrade is at ("Updating data models - 10/14"),
+        an empty string if it is running but said nothing yet, or None if no
+        upgrade is running.
+        """
+        try:
+            with open(cls.UPGRADE_FILE, "r") as upgrade_f:
+                try:
+                    fcntl.flock(upgrade_f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    # Locked: the upgrade is running.
+                    return upgrade_f.read().strip()
+                fcntl.flock(upgrade_f, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return None
 
     def get(self, request, *args, **kwargs):
-        cmd = [
-            "sudo",
-            "-u",
-            f"#{self.root_owner}",
-            "flock",
-            "-n",
-            "/tmp/pynab.upgrade",
-            "bash",
-            "-lc",
-            "echo 'Not upgrading' || cat /tmp/pynab.upgrade",
-        ]
-        _, step, _ = _run_command(cmd)
-        if step == "Not upgrading":
+        step = self.current_step()
+        if step is None:
             return JsonResponse({"status": "done"})
         return JsonResponse({"status": "ok", "message": step})
 

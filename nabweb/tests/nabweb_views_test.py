@@ -1,6 +1,8 @@
 import asyncio
+import fcntl
 import json
 import os
+import tempfile
 import threading
 import time
 from unittest import mock
@@ -207,6 +209,53 @@ class TestGitInfo(TestCase):
             info = views.GitInfo.do_get_repository_info("pynab", ".")
         self.assertEqual(info["status"], "error")
         self.assertTrue("dubious ownership" in info["message"])
+
+
+class TestUpgradeProgress(TestCase):
+    def setUp(self):
+        handle, self.path = tempfile.mkstemp()
+        os.close(handle)
+        patcher = mock.patch.object(
+            views.NabWebUpgradeNowView, "UPGRADE_FILE", self.path
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: os.path.exists(self.path) and os.remove(self.path))
+
+    def test_no_upgrade_file(self):
+        os.remove(self.path)
+        self.assertIsNone(views.NabWebUpgradeNowView.current_step())
+        response = Client().get("/upgrade/now")
+        self.assertEqual(response.json(), {"status": "done"})
+
+    def test_file_not_locked_means_no_upgrade(self):
+        with open(self.path, "w") as upgrade_f:
+            upgrade_f.write("Updating data models - 10/14\n")
+        self.assertIsNone(views.NabWebUpgradeNowView.current_step())
+
+    def test_running_upgrade_reports_its_step(self):
+        """
+        The upgrade keeps the file locked while it runs and writes its
+        current step in it: that step must reach the web page.
+        """
+        with open(self.path, "w") as upgrade_f:
+            fcntl.flock(upgrade_f, fcntl.LOCK_EX)
+            upgrade_f.write("Updating data models - 10/14\n")
+            upgrade_f.flush()
+            response = Client().get("/upgrade/now")
+            self.assertEqual(
+                response.json(),
+                {"status": "ok", "message": "Updating data models - 10/14"},
+            )
+        # Lock released: the upgrade is over.
+        self.assertEqual(
+            Client().get("/upgrade/now").json(), {"status": "done"}
+        )
+
+    def test_page_lists_the_steps(self):
+        response = Client().get("/upgrade/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content.decode().count("data-step="), 15)
 
 
 class TestNabdClientBase(TestCase):

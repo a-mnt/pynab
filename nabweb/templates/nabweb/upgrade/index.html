@@ -4,11 +4,86 @@
     {% trans "Upgrade" %}
 {% endblock %}
 {% block content %}
-    <div class="modal" tabindex="-1" role="dialog" id="upgradeModal">
+    <style>
+      .nab-upgrade-status {
+        margin: 12px 0 14px;
+        font-weight: 600;
+        color: #1f2937;
+      }
+
+      .nab-upgrade-steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 44vh;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+      }
+
+      .nab-upgrade-steps li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 12px;
+        font-size: 0.92rem;
+        color: #9ca3af;
+      }
+
+      .nab-upgrade-steps li + li {
+        border-top: 1px solid #f1f5f9;
+      }
+
+      .nab-upgrade-mark {
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        border: 2px solid #d1d5db;
+        border-radius: 999px;
+      }
+
+      /* done */
+      .nab-upgrade-steps li.is-done {
+        color: #374151;
+      }
+
+      .nab-upgrade-steps li.is-done .nab-upgrade-mark {
+        border-color: #15803d;
+        background: #15803d url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+      }
+
+      /* in progress */
+      .nab-upgrade-steps li.is-current {
+        background: #eef2ff;
+        color: #3341b5;
+        font-weight: 700;
+      }
+
+      .nab-upgrade-steps li.is-current .nab-upgrade-mark {
+        border-color: #c7d2fe;
+        border-top-color: #3341b5;
+        animation: nab-upgrade-spin 0.8s linear infinite;
+      }
+
+      @keyframes nab-upgrade-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .nab-upgrade-steps li.is-current .nab-upgrade-mark {
+          animation: none;
+          border-color: #3341b5;
+        }
+      }
+    </style>
+
+    <div class="modal" tabindex="-1" role="dialog" id="upgradeModal" data-backdrop="static" data-keyboard="false" aria-labelledby="upgradeModalTitle">
         <div class="modal-dialog modal-dialog-centered" role="document">
-            <div class="modal-content">
+            <div class="modal-content nab-modal">
                 <div class="modal-header">
-                    <h5 class="modal-title">{% trans "Upgrade in progress" %}</h5>
+                    <h5 class="modal-title" id="upgradeModalTitle">{% trans "Mise à jour en cours" %}</h5>
                 </div>
                 <div class="modal-body">
                     <div class="progress">
@@ -20,7 +95,26 @@
                              style="width: 100%">
                         </div>
                     </div>
-                    <p id="upgradeStatus" class="mt-2">{% trans "Upgrade is currently in progress..." %}</p>
+                    <p id="upgradeStatus" class="nab-upgrade-status" aria-live="polite">{% trans "Démarrage de la mise à jour…" %}</p>
+                    {# Steps written by upgrade.sh and install.sh in /tmp/pynab.upgrade ("... - n/14") #}
+                    <ol class="nab-upgrade-steps" id="upgradeSteps">
+                        <li data-step="0"><span class="nab-upgrade-mark"></span>{% trans "Arrêt des services" %}</li>
+                        <li data-step="1"><span class="nab-upgrade-mark"></span>{% trans "Téléchargement de Pynab" %}</li>
+                        <li data-step="2"><span class="nab-upgrade-mark"></span>{% trans "Pilote de la carte son" %}</li>
+                        <li data-step="3"><span class="nab-upgrade-mark"></span>{% trans "Pilote des oreilles" %}</li>
+                        <li data-step="4"><span class="nab-upgrade-mark"></span>{% trans "Pilotes RFID / NFC" %}</li>
+                        <li data-step="5"><span class="nab-upgrade-mark"></span>{% trans "NabBlockly" %}</li>
+                        <li data-step="6"><span class="nab-upgrade-mark"></span>{% trans "Modèles de reconnaissance vocale" %}</li>
+                        <li data-step="7"><span class="nab-upgrade-mark"></span>{% trans "Bibliothèques Python" %}</li>
+                        <li data-step="8"><span class="nab-upgrade-mark"></span>{% trans "Modèles de compréhension vocale" %}</li>
+                        <li data-step="9"><span class="nab-upgrade-mark"></span>{% trans "Redémarrage de Nginx" %}</li>
+                        <li data-step="10"><span class="nab-upgrade-mark"></span>{% trans "Base de données" %}</li>
+                        <li data-step="11"><span class="nab-upgrade-mark"></span>{% trans "Traductions" %}</li>
+                        <li data-step="12"><span class="nab-upgrade-mark"></span>{% trans "Fichiers de service" %}</li>
+                        <li data-step="13"><span class="nab-upgrade-mark"></span>{% trans "Redémarrage des services" %}</li>
+                        <li data-step="14"><span class="nab-upgrade-mark"></span>{% trans "Redémarrage du site web" %}</li>
+                    </ol>
+                    <p class="text-muted small mt-3 mb-0">{% trans "Ne débranchez pas le lapin et gardez cette page ouverte." %}</p>
                 </div>
             </div>
         </div>
@@ -170,25 +264,57 @@
         $(".check-now-button .spinner").removeClass("d-none");
         upgradeBtn.addClass("disabled");
         checkNow();
-      }); {% if updatable %}
+      });
 
+      var LAST_STEP = 14;
+      var bar = $("#upgradeModal .progress-bar");
+      var modalShown = false;
+
+      function showUpgradeModal() {
+        if (!modalShown) {
+          modalShown = true;
+          $("#upgradeModal").modal("show");
+        }
+      }
+
+      // Tick the steps before `current`, highlight `current`.
+      function showStep(current) {
+        $("#upgradeSteps li").each(function () {
+          var step = parseInt($(this).data("step"), 10);
+          $(this)
+            .toggleClass("is-done", step < current)
+            .toggleClass("is-current", step === current);
+        });
+        var line = $("#upgradeSteps li.is-current")[0];
+        if (line && line.scrollIntoView) {
+          line.scrollIntoView({ block: "nearest" });
+        }
+      }
+
+      function setBar(ratio) {
+        if (ratio === null) {
+          bar.addClass("progress-bar-striped progress-bar-animated").css("width", "100%");
+        } else {
+          bar.removeClass("progress-bar-striped progress-bar-animated").css("width", ratio + "%");
+        }
+      }
+
+      // `text` is what the upgrade wrote: "Updating data models - 10/14",
+      // "Updating Pynab - 1/?" or "Stopping services".
       function reportProgress(text) {
         var matches = /(.+) - ([0-9]+)\/([0-9]+|\?)/.exec(text);
-        if (matches) {
-          $("#upgradeStatus").text(matches[1]);
-          if (matches[3] == '?') {
-            $("#upgradeModal .progress-bar").addClass("progress-bar-striped");
-            $("#upgradeModal .progress-bar").css("width", "100%");
-          } else {
-            $("#upgradeModal .progress-bar").removeClass("progress-bar-striped");
-            ratio = 100 * parseInt(matches[2]) / parseInt(matches[3]);
-            $("#upgradeModal .progress-bar").css("width", ratio + "%");
-          }
-        } else {
-          $("#upgradeStatus").text(text);
-          $("#upgradeModal .progress-bar").addClass("progress-bar-striped");
-          $("#upgradeModal .progress-bar").css("width", "100%");
+        var current = matches ? parseInt(matches[2], 10) : 0;
+        if (!matches && !/^Stopping services/.test(text)) {
+          // Nothing recognised yet: keep what is shown.
+          return;
         }
+        showStep(current);
+        $("#upgradeStatus").text($("#upgradeSteps li.is-current").text());
+        setBar(matches && matches[3] !== "?" ? Math.round(100 * current / (LAST_STEP + 1)) : (current === 0 ? null : Math.round(100 / (LAST_STEP + 1))));
+      }
+
+      function reportMessage(message) {
+        $("#upgradeStatus").text(message);
       }
 
       function upgradeNowUpdateStatus() {
@@ -198,14 +324,17 @@
           method: "GET",
           success: function (data) {
             if (data.status == 'done') {
+              // Every step is over.
+              showStep(LAST_STEP + 1);
+              setBar(100);
               if (upgradeStep == 1) {
-                reportProgress("Waiting for web server to restart");
+                reportMessage("{% trans 'Attente du redémarrage du site web…' %}");
                 upgradeStep = 2;
                 setTimeout(function () {
                   upgradeNowUpdateStatus();
                 }, 15000);
               } else {
-                reportProgress("Upgrade complete, reloading page");
+                reportMessage("{% trans 'Mise à jour terminée, rechargement de la page…' %}");
                 setTimeout(function () {
                   window.location.reload(true);
                 }, 1000);
@@ -218,7 +347,7 @@
                   upgradeNowUpdateStatus();
                 }, 1000);
               } else {
-                reportProgress("Unknown response from server");
+                reportMessage("{% trans 'Réponse inattendue du lapin, nouvel essai…' %}");
                 setTimeout(function () {
                   upgradeNowUpdateStatus();
                 }, 5000);
@@ -226,7 +355,8 @@
             }
           },
           error: function (data) {
-            reportProgress("Web server is restarting");
+            // Expected at the last step: the web site restarts.
+            reportMessage("{% trans 'Le site web redémarre…' %}");
             setTimeout(function () {
               upgradeNowUpdateStatus();
             }, 5000);
@@ -237,7 +367,7 @@
       function doUpgrade() {
         upgradeBtn.addClass("disabled");
         upgradeBtn.find(".spinner").removeClass("d-none");
-        $('#upgradeModal').modal();
+        showUpgradeModal();
         $.ajax({
           url: "{% url 'nabweb.upgrade.now' %}",
           beforeSend: function (xhr, settings) {
@@ -252,12 +382,12 @@
               }, 1000);
             } else {
               if (data.status == 'error') {
-                $("#upgradeStatus").text(data.message);
+                reportMessage(data.message);
                 setTimeout(function () {
                   upgradeNowUpdateStatus();
                 }, 1000);
               } else {
-                $("#upgradeStatus").text("Unknown response from server");
+                reportMessage("{% trans 'Réponse inattendue du lapin, nouvel essai…' %}");
                 setTimeout(function () {
                   upgradeNowUpdateStatus();
                 }, 5000);
@@ -265,7 +395,7 @@
             }
           },
           error: function (data) {
-            $("#upgradeStatus").text("Internal server error");
+            reportMessage("{% trans 'Erreur du serveur, nouvel essai…' %}");
             setTimeout(function () {
               upgradeNowUpdateStatus();
             }, 5000);
@@ -273,6 +403,9 @@
         });
       }
       upgradeBtn.on("click", function () {
+        if (upgradeBtn.hasClass("disabled")) {
+          return;
+        }
         if ($(".repository-info[data-local-changes='yes']").length == 0) {
           doUpgrade();
         } else {
@@ -282,7 +415,20 @@
       confirmedUpgradeBtn.on("click", function () {
         doUpgrade();
       });
-      {% endif %}
+
+      // Page opened (or reloaded) while an upgrade is already running:
+      // show its progress.
+      $.getJSON("{% url 'nabweb.upgrade.now' %}", function (data) {
+        if (data.status == 'ok' && !modalShown) {
+          upgradeBtn.addClass("disabled");
+          showUpgradeModal();
+          upgradeStep = 1;
+          reportProgress(data.message);
+          setTimeout(function () {
+            upgradeNowUpdateStatus();
+          }, 1000);
+        }
+      });
     });
 
     </script>
