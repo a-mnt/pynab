@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import socket
-import subprocess
 import sys
 import time
 import traceback
@@ -59,6 +58,7 @@ from .rfid import (
 )
 
 _PYTEST = os.path.basename(sys.argv[0]) != "nabd.py"
+_START_TIME = time.monotonic()
 
 
 IdleQueueItem = Tuple[ServicePacket, asyncio.StreamWriter]
@@ -271,7 +271,7 @@ class Nabd:
         except KeyboardInterrupt:
             pass
         except Exception:
-            logging.debug(traceback.format_exc())
+            logging.exception("Idle worker crashed, stopping nabd")
         finally:
             if self.running:
                 self.loop.stop()
@@ -704,23 +704,7 @@ class Nabd:
             "hardware": await self.nabio.gestalt(),
         }
 
-        try:
-            result = subprocess.run(
-                ["ps", "-o", "etimes=", "-p", str(os.getpid())],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                response["uptime"] = int(result.stdout.strip())
-            elif result.returncode != 0 and result.stderr.strip():
-                logging.debug(
-                    "Unable to read process uptime: %s",
-                    result.stderr.strip(),
-                )
-        except (subprocess.SubprocessError, ValueError) as err:
-            logging.debug("Unable to compute uptime in gestalt: %s", err)
+        response["uptime"] = int(time.monotonic() - _START_TIME)
 
         self.write_response_packet(packet, response, writer)
 
@@ -1002,7 +986,7 @@ class Nabd:
                             await self.process_packet(packet, writer)
                     except UnicodeDecodeError as e:
                         logging.debug(f"Unicode Error {e} with service packet")
-                        logging.debug(f"{packet}")
+                        logging.debug(str(line))
                         self.write_response_packet(
                             None,
                             status_error("UnicodeDecodeError", str(e)),
@@ -1200,7 +1184,9 @@ class Nabd:
             packet["app"] = app_str
             if app_data is not None:
                 app_data_str_bin = app_data.split(b"\xFF", 1)[0]
-                app_data_str = app_data_str_bin.decode("utf8")
+                app_data_str = app_data_str_bin.decode(
+                    "utf8", errors="replace"
+                )
                 packet["data"] = app_data_str
             event_type = "rfid/" + app_str
         if self.state != State.ASLEEP and not flags & TagFlags.REMOVED:
