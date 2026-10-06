@@ -12,6 +12,9 @@ class Config(singleton_model.SingletonModel):
         related_name="+",
     )
     is_playing = models.BooleanField(default=False)
+    # Stream URL associated to each RFID tag (JSON object: uid -> URL).
+    # Declared in migration 0002; rfid_data.py reads and writes it.
+    json_data_base = models.TextField(default="", null=True)
 
     def __str__(self) -> str:
         return "Radio configuration"

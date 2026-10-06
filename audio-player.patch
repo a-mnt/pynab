@@ -1,0 +1,2318 @@
+diff --git a/Docker/nab/run-webserver.sh b/Docker/nab/run-webserver.sh
+index 55b68a9..b3047ed 100755
+--- a/Docker/nab/run-webserver.sh
++++ b/Docker/nab/run-webserver.sh
+@@ -1,2 +1,2 @@
+ #!/bin/bash
+-exec /opt/venv/bin/gunicorn --timeout 60 -b 0.0.0.0 nabweb.wsgi
++exec /opt/venv/bin/gunicorn --workers 1 --threads 4 --timeout 60 -b 0.0.0.0 nabweb.wsgi
+diff --git a/nabd/sound_alsa.py b/nabd/sound_alsa.py
+index 19009cb..3c52055 100644
+--- a/nabd/sound_alsa.py
++++ b/nabd/sound_alsa.py
+@@ -194,7 +194,9 @@ class SoundAlsa(Sound):  # pragma: no cover
+     def _stream_mp3(self, device, url):
+         mp3 = Mpg123()
+         # url begins with http:// or https:// (see above)
+-        response = urlopen(url)  # nosec B310
++        # Timeout so that a stalled stream ends (and can be canceled)
++        # instead of blocking the sound thread forever.
++        response = urlopen(url, timeout=10)  # nosec B310
+ 
+         mp3chunk = response.read(4096)
+         if not mp3chunk:
+diff --git a/nabradio/control.py b/nabradio/control.py
+new file mode 100644
+index 0000000..b83d47f
+--- /dev/null
++++ b/nabradio/control.py
+@@ -0,0 +1,126 @@
++"""
++Radio state stored in database, shared by the web views and the daemon.
++
++The web views never talk to nabd: they only write the *desired* state here
++(which station, playing or not) and signal the nabradio daemon. The daemon
++is the only one to send packets to nabd, and it writes the state back when
++playback ends for any reason, so `is_playing` reflects what the rabbit is
++really doing.
++
++Every function here is synchronous. The daemon calls them through
++`sync_to_async`.
++"""
++from typing import Optional, Tuple
++
++from .models import Config, RadioStation
++
++
++def active_stations():
++    return RadioStation.objects.filter(is_active=True).order_by(
++        "position", "id"
++    )
++
++
++def load_config() -> Config:
++    """
++    Load configuration, selecting the first station if none is selected.
++    """
++    config = Config.load()
++    if config.selected_station_id is None:
++        station = active_stations().first()
++        if station is not None:
++            config.selected_station = station
++            config.save(update_fields=["selected_station"])
++    return config
++
++
++def get_desired() -> Tuple[bool, str]:
++    """
++    Return what should be playing: (playing?, stream URL).
++    """
++    config = load_config()
++    station = config.selected_station
++    if station is None:
++        return (False, "")
++    return (bool(config.is_playing), station.stream_url)
++
++
++def set_playing(play: bool, station: Optional[RadioStation] = None) -> bool:
++    """
++    Ask for playback to start (optionally on a given station) or to stop.
++    Return False if playback was requested but there is no station.
++    """
++    config = load_config()
++    if station is not None:
++        config.selected_station = station
++    if play and config.selected_station_id is None:
++        return False
++    config.is_playing = play
++    config.save(update_fields=["selected_station", "is_playing"])
++    return True
++
++
++def switch_station(direction: str) -> bool:
++    """
++    Select next or previous station and ask for playback.
++    Return False if there is no station to switch to.
++    """
++    config = load_config()
++    stations = list(active_stations())
++    if not stations:
++        return False
++    current_index = next(
++        (
++            index
++            for index, station in enumerate(stations)
++            if station.id == config.selected_station_id
++        ),
++        0,
++    )
++    step = 1 if direction == "next" else -1
++    config.selected_station = stations[(current_index + step) % len(stations)]
++    config.is_playing = True
++    config.save(update_fields=["selected_station", "is_playing"])
++    return True
++
++
++def mark_stopped() -> None:
++    """
++    Record that nothing is playing. Only touches `is_playing` so that a
++    station selected at the same time from the website is not overwritten.
++    """
++    Config.load()
++    Config.objects.filter(pk=1).update(is_playing=False)
++
++
++def play_stream_url(stream_url: str) -> None:
++    """
++    Select the station with this stream URL (creating it if needed) and ask
++    for playback. Used for RFID tags.
++    """
++    station = RadioStation.objects.filter(stream_url=stream_url).first()
++    if station is None:
++        last = RadioStation.objects.order_by("-position", "-id").first()
++        station = RadioStation.objects.create(
++            name="Station RFID",
++            stream_url=stream_url,
++            position=(last.position + 1) if last else 0,
++            is_favorite=False,
++            is_active=True,
++        )
++    set_playing(True, station)
++
++
++def status_payload() -> dict:
++    """
++    Current radio state, as returned to the website.
++    """
++    config = load_config()
++    station = config.selected_station
++    return {
++        "is_playing": bool(config.is_playing) and station is not None,
++        "station": (
++            {"id": station.id, "name": station.name} if station else None
++        ),
++        "can_switch": active_stations().count() > 1,
++    }
+diff --git a/nabradio/models.py b/nabradio/models.py
+index 5f3cec5..cac4bee 100644
+--- a/nabradio/models.py
++++ b/nabradio/models.py
+@@ -12,6 +12,9 @@ class Config(singleton_model.SingletonModel):
+         related_name="+",
+     )
+     is_playing = models.BooleanField(default=False)
++    # Stream URL associated to each RFID tag (JSON object: uid -> URL).
++    # Declared in migration 0002; rfid_data.py reads and writes it.
++    json_data_base = models.TextField(default="", null=True)
+ 
+     def __str__(self) -> str:
+         return "Radio configuration"
+diff --git a/nabradio/nabradio.py b/nabradio/nabradio.py
+index 59e8854..078d69c 100644
+--- a/nabradio/nabradio.py
++++ b/nabradio/nabradio.py
+@@ -1,120 +1,170 @@
++import asyncio
+ import datetime
+ import json
+ import logging
+ import sys
+ from typing import Optional
+ 
++from asgiref.sync import sync_to_async
++
+ from nabcommon.nabservice import NabService
+ 
+-from . import rfid_data
+-from .models import Config, RadioStation
++from . import control, rfid_data
+ 
++# A single request id: nabd plays one radio message at a time, and a fixed id
++# lets a restarted daemon cancel a stream left over by the previous one.
+ RADIO_REQUEST_ID = "nabradio-live"
++# nabd only checks expiration when it takes the message out of its queue. If
++# the rabbit is asleep or busy for longer than this, the radio is dropped
++# instead of starting much later, out of the blue.
++START_TIMEOUT_SECONDS = 30
++# nabd refuses to cancel a message that is still waiting in its queue.
++CANCEL_RETRY_SECONDS = 1
+ EARS_STEPS = 17
++# Value returned by rfid_data when a tag has no stream associated.
++RFID_NO_STREAM = "NO_EVENT_NAME"
++CANCEL_REFUSED_CLASSES = ("NotPlaying", "NotCancelable")
+ 
+ 
+ class NabRadio(NabService):
++    """
++    Radio daemon.
++
++    The website writes the desired state in database (see control.py) and
++    sends SIGUSR1. This daemon is the only one to talk to nabd: it starts and
++    cancels the stream so that what plays matches the desired state, and it
++    listens to nabd responses to know when playback really ended (stopped
++    from the button, stream error, end of stream...).
++    """
++
+     def __init__(self):
+         super().__init__()
+-        self.is_playing = False
+-        self.current_station_id: Optional[int] = None
+-        self.current_stream_url = ""
++        # True from the moment a message is sent to nabd until nabd reports
++        # it ended. The message may be playing or still in nabd's queue.
++        self.active = False
++        self.active_url = ""
++        self.cancel_sent = False
++        # False until the startup cleanup is done.
++        self.ready = False
+         self.right_ear_position: Optional[int] = None
++        self._lock: Optional[asyncio.Lock] = None
++        self._retry_task: Optional[asyncio.Future] = None
++
++    def _get_lock(self) -> asyncio.Lock:
++        # Created lazily so that it is bound to the running event loop.
++        if self._lock is None:
++            self._lock = asyncio.Lock()
++        return self._lock
+ 
+     async def _send_packet(self, packet):
+         assert self.writer is not None
+         self.writer.write((json.dumps(packet) + "\r\n").encode("utf8"))
+         await self.writer.drain()
+ 
+-    async def _launch_radio(self, streaming_url: str):
+-        logging.info("nabradio: play %s", streaming_url)
++    async def _launch(self, stream_url: str):
++        logging.info("nabradio: play %s", stream_url)
+         now = datetime.datetime.now(datetime.timezone.utc)
+-        expiration = now + datetime.timedelta(hours=12)
+-
+-        packet = {
+-            "type": "message",
+-            "request_id": RADIO_REQUEST_ID,
+-            "signature": {
+-                "audio": ["nabradio/*.mp3"],
+-            },
+-            "body": [
+-                {
+-                    "audio": [streaming_url],
+-                }
+-            ],
+-            "expiration": expiration.isoformat(),
+-        }
+-        await self._send_packet(packet)
+-
+-    async def _stop_radio(self):
+-        logging.info("nabradio: stop")
+-        packet = {
+-            "type": "cancel",
+-            "request_id": RADIO_REQUEST_ID,
+-        }
+-        await self._send_packet(packet)
+-
+-    async def _load_state(self):
+-        config = await Config.load_async()
+-        stations = []
+-        async for station in RadioStation.objects.filter(is_active=True).order_by("position", "id"):
+-            stations.append(station)
+-
+-        selected_station = config.selected_station
+-        if selected_station is None and stations:
+-            selected_station = stations[0]
+-            config.selected_station = selected_station
+-            await config.save_async()
+-
+-        return config, stations, selected_station
+-
+-    async def _apply_state(self):
+-        config, stations, selected_station = await self._load_state()
+-
+-        desired_playing = bool(config.is_playing)
+-        desired_station_id = selected_station.id if selected_station else None
+-        desired_stream_url = selected_station.stream_url if selected_station else ""
+-
+-        if desired_playing and selected_station is not None:
+-            if (not self.is_playing) or (self.current_stream_url != desired_stream_url):
+-                await self._launch_radio(desired_stream_url)
+-        else:
+-            if self.is_playing:
+-                await self._stop_radio()
+-
+-        self.is_playing = desired_playing
+-        self.current_station_id = desired_station_id
+-        self.current_stream_url = desired_stream_url
+-
+-    async def reload_config(self):
+-        await self._apply_state()
+-
+-    async def _set_selected_station(self, station: RadioStation, play: bool):
+-        config = await Config.load_async()
+-        config.selected_station = station
+-        config.is_playing = play
+-        await config.save_async()
+-        await self._apply_state()
+-
+-    async def _switch_station(self, direction: str):
+-        config, stations, selected_station = await self._load_state()
+-        if not stations or selected_station is None:
+-            return
++        expiration = now + datetime.timedelta(seconds=START_TIMEOUT_SECONDS)
++        self.active = True
++        self.active_url = stream_url
++        self.cancel_sent = False
++        await self._send_packet(
++            {
++                "type": "message",
++                "request_id": RADIO_REQUEST_ID,
++                "signature": {"audio": ["nabradio/*.mp3"]},
++                "body": [{"audio": [stream_url]}],
++                "expiration": expiration.isoformat(),
++            }
++        )
+ 
+-        current_index = next(
+-            (index for index, station in enumerate(stations) if station.id == selected_station.id),
+-            0,
++    async def _cancel(self):
++        logging.info("nabradio: stop %s", self.active_url)
++        self.cancel_sent = True
++        await self._send_packet(
++            {"type": "cancel", "request_id": RADIO_REQUEST_ID}
+         )
+ 
+-        if direction == "next":
+-            new_index = (current_index + 1) % len(stations)
+-        else:
+-            new_index = (current_index - 1) % len(stations)
++    async def _reconcile(self):
++        """
++        Make nabd play what the database says should be playing.
++        Must be called with the lock held.
++        """
++        want_playing, stream_url = await sync_to_async(control.get_desired)()
++        if not self.active:
++            if want_playing and stream_url:
++                await self._launch(stream_url)
++        elif not want_playing or stream_url != self.active_url:
++            # Stop, or change of station: the current stream must end first.
++            # The new station is started when nabd confirms the end.
++            if not self.cancel_sent:
++                await self._cancel()
+ 
+-        config.selected_station = stations[new_index]
+-        config.is_playing = True
+-        await config.save_async()
+-        await self._apply_state()
++    async def reload_config(self):
++        async with self._get_lock():
++            if self.ready:
++                await self._reconcile()
++
++    async def _startup(self):
++        """
++        Nothing can be playing on our behalf when we start, except a stream
++        left over by a previous instance of this daemon: cancel it, and
++        record that the radio is stopped.
++        """
++        async with self._get_lock():
++            await sync_to_async(control.mark_stopped)()
++            await self._send_packet(
++                {"type": "cancel", "request_id": RADIO_REQUEST_ID}
++            )
++            self.ready = True
++
++    async def _retry_later(self):
++        await asyncio.sleep(CANCEL_RETRY_SECONDS)
++        self._retry_task = None
++        try:
++            await self.reload_config()
++        except Exception as err:  # connection to nabd lost meanwhile
++            logging.debug("nabradio: retry failed: %s", err)
++
++    async def _process_response(self, packet):
++        async with self._get_lock():
++            if not self.active:
++                # Answer to the startup cancel, or to a cancel that crossed
++                # the end of the stream.
++                return
++
++            status = packet.get("status")
++            if status == "error" and (
++                packet.get("class") in CANCEL_REFUSED_CLASSES
++            ):
++                # Our message is still in nabd's queue: try again shortly.
++                self.cancel_sent = False
++                if self._retry_task is None:
++                    self._retry_task = asyncio.ensure_future(
++                        self._retry_later()
++                    )
++                return
++
++            # Any other response means the message is over: played to the
++            # end, canceled, expired before starting, or failed.
++            ended_url = self.active_url
++            canceled_by_us = self.cancel_sent
++            self.active = False
++            self.active_url = ""
++            self.cancel_sent = False
++            logging.info("nabradio: ended (%s) %s", status, ended_url)
++
++            if not canceled_by_us:
++                # Stopped from the rabbit's button, stream error or end of
++                # stream. Unless another station was asked for meanwhile,
++                # the radio is now stopped.
++                want_playing, stream_url = await sync_to_async(
++                    control.get_desired
++                )()
++                if want_playing and stream_url == ended_url:
++                    await sync_to_async(control.mark_stopped)()
++
++            await self._reconcile()
+ 
+     async def _handle_right_ear_rotation(self, new_position: int):
+         if self.right_ear_position is None:
+@@ -130,52 +180,43 @@ class NabRadio(NabService):
+         if delta == 0:
+             return
+ 
+-        if delta <= EARS_STEPS // 2:
+-            await self._switch_station("next")
+-        else:
+-            await self._switch_station("previous")
+-
+-    async def _play_rfid_station(self, streaming_url: str):
+-        station = await RadioStation.objects.filter(stream_url=streaming_url).afirst()
+-
+-        if station is None:
+-            last_station = await RadioStation.objects.order_by("-position", "-id").afirst()
+-            next_position = (last_station.position + 1) if last_station else 0
+-            station = await RadioStation.objects.acreate(
+-                name="Station RFID",
+-                stream_url=streaming_url,
+-                position=next_position,
+-                is_favorite=False,
+-                is_active=True,
+-            )
+-
+-        await self._set_selected_station(station, True)
++        direction = "next" if delta <= EARS_STEPS // 2 else "previous"
++        if await sync_to_async(control.switch_station)(direction):
++            await self.reload_config()
+ 
+     async def process_nabd_packet(self, packet):
+         packet_type = packet.get("type")
+ 
++        if (
++            packet_type == "response"
++            and packet.get("request_id") == RADIO_REQUEST_ID
++        ):
++            await self._process_response(packet)
++            return
++
+         if (
+             packet_type == "rfid_event"
+             and packet.get("app") == "nabradio"
+             and packet.get("event") == "detected"
+         ):
+-            streaming_url = await rfid_data.read_data_ui(packet["uid"])
+-            if streaming_url:
+-                await self._play_rfid_station(streaming_url)
++            stream_url = await rfid_data.read_data_ui(packet["uid"])
++            if stream_url and stream_url != RFID_NO_STREAM:
++                await sync_to_async(control.play_stream_url)(stream_url)
++                await self.reload_config()
+             return
+ 
+         if packet_type == "ears_event":
+             right_position = packet.get("right")
+             if isinstance(right_position, int):
+-                if self.is_playing:
++                if self.active:
+                     await self._handle_right_ear_rotation(right_position)
+                 else:
+                     self.right_ear_position = right_position
+ 
+-    async def start_service_loop(self, loop):
+-        loop.create_task(self.reload_config())
++    def start_service_loop(self, loop):
++        loop.create_task(self._startup())
+         return None
+ 
+ 
+ if __name__ == "__main__":
+-    NabRadio.main(sys.argv[1:])
+\ No newline at end of file
++    NabRadio.main(sys.argv[1:])
+diff --git a/nabradio/templates/nabradio/settings.html b/nabradio/templates/nabradio/settings.html
+index ba47b80..c0fd534 100644
+--- a/nabradio/templates/nabradio/settings.html
++++ b/nabradio/templates/nabradio/settings.html
+@@ -1,6 +1,6 @@
+ {% load i18n %}
+ 
+-<div class="card">
++<div class="card js-nabradio-card" data-playing="{{ is_playing|yesno:'1,0' }}" data-station="{{ selected_station_id|default:'' }}">
+   <div class="card-header">
+     <h5 class="mb-0">{% trans "Radio" %}</h5>
+   </div>
+@@ -218,42 +218,19 @@
+       return $(element).closest(".nab-service-settings-container, .card, body");
+     }
+ 
+-    function refreshHomeRadioWidget(response) {
+-      var widget = $("#home-radio-widget");
+-      if (!widget.length) {
+-        return;
+-      }
+-
+-      var title = widget.find(".js-home-radio-title");
+-      var status = widget.find(".js-home-radio-status");
+-      var stopButton = widget.find(".js-home-radio-stop");
+-
+-      if (response.selected_name) {
+-        title.text(response.selected_name);
+-      }
+-
+-      if (response.is_playing) {
+-        status
+-          .removeClass("badge-secondary")
+-          .addClass("badge-success")
+-          .text("En lecture");
+-        stopButton.removeClass("d-none");
+-      } else {
+-        status
+-          .removeClass("badge-success")
+-          .addClass("badge-secondary")
+-          .text("Arrêtée");
+-        stopButton.addClass("d-none");
+-      }
++    function reloadRadioCard(root) {
++      $.get("{% url 'nabradio.settings' %}", function(html) {
++        if (root.hasClass("nab-service-settings-container")) {
++          root.html(html);
++        }
++      });
+     }
+ 
+     $(document)
+       .off("click.nabradioAction")
+       .on("click.nabradioAction", ".js-radio-action", function() {
+         var button = $(this);
+-        var form = button.closest("form");
+-        form.data("clicked-action-name", button.attr("name"));
+-        form.data("clicked-action-value", button.val());
++        button.closest("form").data("clicked-action-value", button.val());
+       });
+ 
+     $(document)
+@@ -283,6 +260,10 @@
+     $(document)
+       .off("submit.nabradioSettings")
+       .on("submit.nabradioSettings", ".js-nabradio-settings-form", function(event) {
++        if (event.isDefaultPrevented()) {
++          // Deletion not confirmed (see handler above).
++          return;
++        }
+         event.preventDefault();
+ 
+         var form = $(this);
+@@ -298,6 +279,10 @@
+             } else {
+               $("body").html(html);
+             }
++            // The selected station may have been edited or deleted.
++            if (window.NabPlayer) {
++              window.NabPlayer.refresh();
++            }
+           },
+           error: function() {
+             alert("Impossible d'enregistrer la configuration radio.");
+@@ -305,6 +290,7 @@
+         });
+       });
+ 
++    // Play / stop: goes through the player bar, which is then up to date.
+     $(document)
+       .off("submit.nabradioControl")
+       .on("submit.nabradioControl", ".js-nabradio-control-form", function(event) {
+@@ -312,69 +298,50 @@
+ 
+         var form = $(this);
+         var feedback = form.find(".js-nabradio-control-feedback");
+-        var actionName = form.data("clicked-action-name") || "action";
+-        var actionValue = form.data("clicked-action-value") || "";
+-        var payload = form.serialize();
++        var action = form.data("clicked-action-value") || "play";
++        var stationId = form.find("input[name='selected_radio']").val();
+ 
+-        if (actionValue) {
+-          payload += "&" + encodeURIComponent(actionName) + "=" + encodeURIComponent(actionValue);
+-        }
++        feedback.empty();
+ 
+-        feedback.html("");
++        if (!window.NabPlayer) {
++          return;
++        }
+ 
+-        $.ajax({
+-          url: form.attr("action"),
+-          method: "POST",
+-          data: payload,
+-          success: function(response) {
+-            refreshHomeRadioWidget(response);
+-
+-            var root = findRadioRoot(form);
+-            $.get("{% url 'nabradio.settings' %}", function(html) {
+-              if (root.hasClass("nab-service-settings-container")) {
+-                root.html(html);
+-              }
+-            });
++        window.NabPlayer.send(action, stationId).then(
++          function() {
++            reloadRadioCard(findRadioRoot(form));
+           },
+-          error: function(xhr) {
+-            var message = "Action impossible.";
+-            if (xhr.responseJSON && xhr.responseJSON.message) {
+-              message = xhr.responseJSON.message;
+-            }
+-
+-            feedback.html(
+-              '<div class="alert alert-danger mb-0" role="alert">' +
+-                message +
+-              '</div>'
++          function(error) {
++            feedback.empty().append(
++              $('<div class="alert alert-danger mb-0" role="alert"></div>').text(error.message)
+             );
+           }
+-        });
++        );
+       });
+ 
++    // Radio stopped or changed from elsewhere (player bar, rabbit button,
++    // end of stream): refresh this card, unless something is being typed.
+     $(document)
+-      .off("click.homeRadioStop")
+-      .on("click.homeRadioStop", ".js-home-radio-stop", function(event) {
+-        event.preventDefault();
++      .off("nabradio:status.nabradioCard")
++      .on("nabradio:status.nabradioCard", function(event) {
++        var state = event.originalEvent.detail;
++        var card = $(".js-nabradio-card");
++        var root = card.closest(".nab-service-settings-container");
++        if (!card.length || !root.length) {
++          return;
++        }
+ 
+-        $.ajax({
+-          url: "{% url 'nabradio.control' %}",
+-          method: "POST",
+-          data: {
+-            csrfmiddlewaretoken: $("input[name='csrfmiddlewaretoken']").first().val(),
+-            action: "stop",
+-            selected_radio: "{{ selected_station_id|default:'' }}"
+-          },
+-          success: function(response) {
+-            refreshHomeRadioWidget(response);
+-
+-            var root = $(".nab-service-settings-container[data-service='nabradio']");
+-            if (root.length) {
+-              $.get("{% url 'nabradio.settings' %}", function(html) {
+-                root.html(html);
+-              });
+-            }
+-          }
+-        });
++        var playing = state.is_playing ? "1" : "0";
++        var station = state.station ? String(state.station.id) : "";
++        if (String(card.data("playing")) === playing && String(card.data("station")) === station) {
++          return;
++        }
++
++        var editing = card.find(".js-edit-radio-panel:visible").length > 0 ||
++          $("#nabradio-radio-name").val() || $("#nabradio-radio-url").val();
++        if (!editing) {
++          reloadRadioCard(root);
++        }
+       });
+   })();
+-</script>
+\ No newline at end of file
++</script>
+diff --git a/nabradio/tests/nabradio_test.py b/nabradio/tests/nabradio_test.py
+new file mode 100644
+index 0000000..fcc6b7f
+--- /dev/null
++++ b/nabradio/tests/nabradio_test.py
+@@ -0,0 +1,230 @@
++import json
++
++from asgiref.sync import async_to_sync
++from django.test import TestCase
++
++from nabradio import control
++from nabradio.models import Config, RadioStation
++from nabradio.nabradio import RADIO_REQUEST_ID, NabRadio
++
++
++class FakeWriter:
++    """Records the packets the daemon sends to nabd."""
++
++    def __init__(self):
++        self.packets = []
++
++    def write(self, data):
++        self.packets.append(json.loads(data.decode("utf8")))
++
++    async def drain(self):
++        pass
++
++    def pop_all(self):
++        packets = self.packets
++        self.packets = []
++        return packets
++
++
++def response(status, **slots):
++    packet = {
++        "type": "response",
++        "request_id": RADIO_REQUEST_ID,
++        "status": status,
++    }
++    packet.update(slots)
++    return packet
++
++
++class TestNabRadio(TestCase):
++    def setUp(self):
++        RadioStation.objects.all().delete()
++        self.station1 = RadioStation.objects.create(
++            name="One", stream_url="http://example.com/one.mp3", position=0
++        )
++        self.station2 = RadioStation.objects.create(
++            name="Two", stream_url="http://example.com/two.mp3", position=1
++        )
++        config = Config.load()
++        config.selected_station = self.station1
++        config.is_playing = False
++        config.save()
++
++        self.service = NabRadio()
++        self.service.writer = FakeWriter()
++        self.run_async(self.service._startup)
++        # Startup cancels any stream left by a previous instance.
++        self.assertEqual(
++            self.service.writer.pop_all(),
++            [{"type": "cancel", "request_id": RADIO_REQUEST_ID}],
++        )
++
++    def run_async(self, function, *args):
++        return async_to_sync(function)(*args)
++
++    def reload(self):
++        self.run_async(self.service.reload_config)
++        return self.service.writer.pop_all()
++
++    def receive(self, packet):
++        self.run_async(self.service.process_nabd_packet, packet)
++        return self.service.writer.pop_all()
++
++    def is_playing(self):
++        return Config.load().is_playing
++
++    def test_startup_marks_stopped(self):
++        control.set_playing(True)
++        service = NabRadio()
++        service.writer = FakeWriter()
++        self.run_async(service._startup)
++        self.assertFalse(self.is_playing())
++        # Answer to the startup cancel is ignored.
++        self.run_async(
++            service.process_nabd_packet,
++            response("error", **{"class": "NotPlaying"}),
++        )
++        self.assertFalse(service.active)
++
++    def test_nothing_to_do(self):
++        self.assertEqual(self.reload(), [])
++
++    def test_play_then_stop(self):
++        control.set_playing(True)
++        packets = self.reload()
++        self.assertEqual(len(packets), 1)
++        self.assertEqual(packets[0]["type"], "message")
++        self.assertEqual(packets[0]["request_id"], RADIO_REQUEST_ID)
++        self.assertEqual(
++            packets[0]["body"], [{"audio": [self.station1.stream_url]}]
++        )
++        self.assertTrue("expiration" in packets[0])
++        # Signaled again: the stream is not started twice.
++        self.assertEqual(self.reload(), [])
++
++        control.set_playing(False)
++        self.assertEqual(
++            self.reload(), [{"type": "cancel", "request_id": RADIO_REQUEST_ID}]
++        )
++        # Cancel is sent once.
++        self.assertEqual(self.reload(), [])
++        self.assertEqual(self.receive(response("canceled")), [])
++        self.assertFalse(self.service.active)
++        self.assertFalse(self.is_playing())
++
++    def test_change_station_cancels_first(self):
++        control.set_playing(True)
++        self.reload()
++
++        control.set_playing(True, self.station2)
++        # The new station is not queued behind the current one.
++        self.assertEqual(
++            self.reload(), [{"type": "cancel", "request_id": RADIO_REQUEST_ID}]
++        )
++        packets = self.receive(response("canceled"))
++        self.assertEqual(len(packets), 1)
++        self.assertEqual(packets[0]["type"], "message")
++        self.assertEqual(
++            packets[0]["body"], [{"audio": [self.station2.stream_url]}]
++        )
++        self.assertTrue(self.is_playing())
++
++    def test_stopped_from_rabbit_button(self):
++        control.set_playing(True)
++        self.reload()
++        # nabd reports the cancel although we did not ask for it.
++        self.assertEqual(self.receive(response("canceled")), [])
++        self.assertFalse(self.is_playing())
++        self.assertFalse(self.service.active)
++
++    def test_stream_ended_or_failed(self):
++        for status in ("ok", "expired", "error"):
++            control.set_playing(True)
++            self.assertEqual(len(self.reload()), 1)
++            self.assertEqual(self.receive(response(status)), [])
++            self.assertFalse(self.is_playing())
++
++    def test_other_station_asked_when_stream_ends(self):
++        control.set_playing(True)
++        self.reload()
++        # Website selects another station, stream ends before the signal.
++        control.set_playing(True, self.station2)
++        packets = self.receive(response("ok"))
++        self.assertEqual(len(packets), 1)
++        self.assertEqual(
++            packets[0]["body"], [{"audio": [self.station2.stream_url]}]
++        )
++        self.assertTrue(self.is_playing())
++
++    def test_cancel_refused_is_retried(self):
++        control.set_playing(True)
++        self.reload()
++        control.set_playing(False)
++        self.assertEqual(len(self.reload()), 1)
++
++        async def refused():
++            # Message is still in nabd's queue: cancel is refused.
++            await self.service.process_nabd_packet(
++                response("error", **{"class": "NotPlaying"})
++            )
++            # A retry is scheduled; run it now instead of waiting.
++            self.assertIsNotNone(self.service._retry_task)
++            self.service._retry_task.cancel()
++            self.service._retry_task = None
++
++        self.run_async(refused)
++        self.assertTrue(self.service.active)
++        self.assertFalse(self.service.cancel_sent)
++        self.assertEqual(
++            self.reload(), [{"type": "cancel", "request_id": RADIO_REQUEST_ID}]
++        )
++        self.assertEqual(self.receive(response("canceled")), [])
++        self.assertFalse(self.service.active)
++
++    def test_other_responses_ignored(self):
++        control.set_playing(True)
++        self.reload()
++        self.assertEqual(
++            self.receive({"type": "response", "status": "ok"}), []
++        )
++        self.assertEqual(
++            self.receive(
++                {"type": "response", "request_id": "other", "status": "ok"}
++            ),
++            [],
++        )
++        self.assertEqual(self.receive({"type": "state", "state": "idle"}), [])
++        self.assertTrue(self.service.active)
++        self.assertTrue(self.is_playing())
++
++    def test_rfid_without_stream(self):
++        packets = self.receive(
++            {
++                "type": "rfid_event",
++                "app": "nabradio",
++                "event": "detected",
++                "uid": "d0:02:1a:03:00:00:00:01",
++            }
++        )
++        self.assertEqual(packets, [])
++        self.assertEqual(RadioStation.objects.count(), 2)
++        self.assertFalse(self.is_playing())
++
++    def test_rfid_with_stream(self):
++        uid = "d0:02:1a:03:00:00:00:02"
++        config = Config.load()
++        config.json_data_base = json.dumps({uid: self.station2.stream_url})
++        config.save()
++        packets = self.receive(
++            {
++                "type": "rfid_event",
++                "app": "nabradio",
++                "event": "detected",
++                "uid": uid,
++            }
++        )
++        self.assertEqual(len(packets), 1)
++        self.assertEqual(
++            packets[0]["body"], [{"audio": [self.station2.stream_url]}]
++        )
++        self.assertTrue(self.is_playing())
+diff --git a/nabradio/tests/nabradio_views_test.py b/nabradio/tests/nabradio_views_test.py
+new file mode 100644
+index 0000000..65589f2
+--- /dev/null
++++ b/nabradio/tests/nabradio_views_test.py
+@@ -0,0 +1,98 @@
++from unittest import mock
++
++from django.test import Client, TestCase
++
++from nabradio.models import Config, RadioStation
++
++
++class TestRadioViews(TestCase):
++    def setUp(self):
++        RadioStation.objects.all().delete()
++        self.station1 = RadioStation.objects.create(
++            name="One", stream_url="http://example.com/one.mp3", position=0
++        )
++        self.station2 = RadioStation.objects.create(
++            name="Two", stream_url="http://example.com/two.mp3", position=1
++        )
++        config = Config.load()
++        config.selected_station = self.station1
++        config.is_playing = False
++        config.save()
++
++    def control(self, daemon_running=True, **data):
++        with mock.patch(
++            "nabradio.views._signal_radio_daemon", return_value=daemon_running
++        ) as signal_mock:
++            response = Client().post("/nabradio/control", data)
++        return response, signal_mock
++
++    def test_status(self):
++        response = Client().get("/nabradio/status")
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(
++            response.json(),
++            {
++                "is_playing": False,
++                "station": {"id": self.station1.id, "name": "One"},
++                "can_switch": True,
++            },
++        )
++
++    def test_play_and_stop(self):
++        response, signal_mock = self.control(action="play")
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.json()["status"], "ok")
++        self.assertTrue(response.json()["is_playing"])
++        signal_mock.assert_called_once()
++        self.assertTrue(Config.load().is_playing)
++        self.assertTrue(Client().get("/nabradio/status").json()["is_playing"])
++
++        response, signal_mock = self.control(action="stop")
++        self.assertEqual(response.status_code, 200)
++        self.assertFalse(response.json()["is_playing"])
++        signal_mock.assert_called_once()
++        self.assertFalse(Config.load().is_playing)
++
++    def test_play_given_station(self):
++        response, _ = self.control(
++            action="play", selected_radio=self.station2.id
++        )
++        self.assertEqual(response.json()["station"]["name"], "Two")
++        config = Config.load()
++        self.assertEqual(config.selected_station_id, self.station2.id)
++        self.assertTrue(config.is_playing)
++
++    def test_next_previous(self):
++        response, _ = self.control(action="next")
++        self.assertEqual(response.json()["station"]["name"], "Two")
++        self.assertTrue(response.json()["is_playing"])
++        response, _ = self.control(action="next")
++        self.assertEqual(response.json()["station"]["name"], "One")
++        response, _ = self.control(action="previous")
++        self.assertEqual(response.json()["station"]["name"], "Two")
++
++    def test_daemon_not_running(self):
++        response, _ = self.control(daemon_running=False, action="play")
++        self.assertEqual(response.status_code, 503)
++        self.assertEqual(response.json()["status"], "error")
++        self.assertFalse(response.json()["is_playing"])
++        self.assertFalse(Config.load().is_playing)
++        # Stopping is always possible.
++        response, _ = self.control(daemon_running=False, action="stop")
++        self.assertEqual(response.status_code, 200)
++
++    def test_unknown_action(self):
++        response, signal_mock = self.control(action="dance")
++        self.assertEqual(response.status_code, 400)
++        signal_mock.assert_not_called()
++
++    def test_views_do_not_talk_to_nabd(self):
++        with mock.patch("socket.create_connection") as connect_mock:
++            self.control(action="play")
++            self.control(action="stop")
++        connect_mock.assert_not_called()
++
++    def test_settings_card(self):
++        response = Client().get("/nabradio/settings")
++        self.assertEqual(response.status_code, 200)
++        self.assertContains(response, "js-nabradio-card")
+diff --git a/nabradio/urls.py b/nabradio/urls.py
+index d46dcb8..28eac98 100644
+--- a/nabradio/urls.py
++++ b/nabradio/urls.py
+@@ -1,9 +1,10 @@
+ from django.urls import path
+ 
+-from .views import ControlView, RFIDDataView, SettingsView
++from .views import ControlView, RFIDDataView, SettingsView, StatusView
+ 
+ urlpatterns = [
+     path("settings", SettingsView.as_view(), name="nabradio.settings"),
++    path("status", StatusView.as_view(), name="nabradio.status"),
+     path("control", ControlView.as_view(), name="nabradio.control"),
+     path("rfid-data", RFIDDataView.as_view(), name="nabradio.rfid-data"),
+-]
+\ No newline at end of file
++]
+diff --git a/nabradio/views.py b/nabradio/views.py
+index 0fe7b52..90cd0ce 100644
+--- a/nabradio/views.py
++++ b/nabradio/views.py
+@@ -1,61 +1,30 @@
+-import datetime
+-import json
+-import socket
++import os
++import signal
+ from typing import Optional
+ 
+ from django.db import transaction
+ from django.http import JsonResponse
+ from django.shortcuts import render
+-from django.views.generic import TemplateView
++from django.views.generic import TemplateView, View
+ 
+-from . import rfid_data
++from . import control, rfid_data
+ from .models import Config, RadioStation
+ 
++RADIO_PIDFILE = "/run/nabradio.pid"
+ 
+-RADIO_REQUEST_ID = "nabradio-live"
+ 
+-
+-def _send_nabd_packet(packet) -> None:
+-    payload = json.dumps(packet) + "\r\n"
+-    with socket.create_connection(("127.0.0.1", 10543), timeout=3) as sock:
+-        sock.sendall(payload.encode("utf8"))
+-
+-
+-def _play_stream(stream_url: str) -> None:
+-    now = datetime.datetime.now(datetime.timezone.utc)
+-    expiration = now + datetime.timedelta(hours=12)
+-
+-    packet = {
+-        "type": "message",
+-        "request_id": RADIO_REQUEST_ID,
+-        "signature": {
+-            "audio": ["nabradio/*.mp3"],
+-        },
+-        "body": [
+-            {
+-                "audio": [stream_url],
+-            }
+-        ],
+-        "expiration": expiration.isoformat(),
+-    }
+-    _send_nabd_packet(packet)
+-
+-
+-def _stop_stream() -> None:
+-    packet = {
+-        "type": "cancel",
+-        "request_id": RADIO_REQUEST_ID,
+-    }
+-    _send_nabd_packet(packet)
+-
+-
+-def _signal_radio_daemon() -> None:
++def _signal_radio_daemon() -> bool:
++    """
++    Tell the nabradio daemon that the desired state changed in database.
++    The daemon is the only one to talk to nabd. Return False if it is not
++    running.
++    """
+     try:
+-        from .nabradio import NabRadio
+-
+-        NabRadio.signal_daemon()
+-    except Exception:
+-        pass
++        with open(RADIO_PIDFILE, "r") as f:
++            os.kill(int(f.read().strip()), signal.SIGUSR1)
++        return True
++    except (OSError, ValueError):
++        return False
+ 
+ 
+ def _all_stations():
+@@ -220,12 +189,8 @@ class SettingsView(TemplateView):
+                 station.stream_url = radio_url
+                 station.save(update_fields=["name", "stream_url"])
+ 
+-                if config.selected_station_id == station.id and config.is_playing:
+-                    try:
+-                        _play_stream(station.stream_url)
+-                    except Exception:
+-                        pass
+-
++                # If this station is playing, the daemon restarts it with
++                # the new URL.
+                 _signal_radio_daemon()
+                 flash_message = "Radio modifiée."
+ 
+@@ -306,74 +271,58 @@ class SettingsView(TemplateView):
+         return render(request, self.template_name, context=context)
+ 
+ 
+-class ControlView(TemplateView):
+-    def post(self, request, *args, **kwargs):
+-        config = _get_or_create_config()
+-        action = request.POST.get("action", "").strip()
+-        station = _selected_station_from_request(request)
++class StatusView(View):
++    """
++    Current radio state, polled by the player shown on every page.
++    """
+ 
+-        if station is not None and config.selected_station_id != station.id:
+-            config.selected_station = station
+-            config.save(update_fields=["selected_station"])
++    def get(self, request, *args, **kwargs):
++        _ensure_default_stations()
++        response = JsonResponse(control.status_payload())
++        response["Cache-Control"] = "no-store"
++        return response
+ 
+-        selected_station = config.selected_station
+ 
+-        if action == "play":
+-            if selected_station is None:
+-                return JsonResponse(
+-                    {"status": "error", "message": "Aucune radio sélectionnée."},
+-                    status=400,
+-                )
++class ControlView(View):
++    """
++    Play, stop or change station. Only writes the desired state in database
++    and signals the daemon.
++    """
+ 
+-            try:
+-                _play_stream(selected_station.stream_url)
+-            except Exception as exc:
+-                return JsonResponse(
+-                    {"status": "error", "message": f"Impossible de lancer la lecture: {exc}"},
+-                    status=500,
+-                )
+-
+-            config.is_playing = True
+-            config.save(update_fields=["is_playing"])
+-            _signal_radio_daemon()
++    def post(self, request, *args, **kwargs):
++        _ensure_default_stations()
++        action = request.POST.get("action", "").strip()
+ 
++        if action == "play":
++            station = _selected_station_from_request(request)
++            done = control.set_playing(True, station)
++        elif action == "stop":
++            done = control.set_playing(False)
++        elif action in ("next", "previous"):
++            done = control.switch_station(action)
++        else:
+             return JsonResponse(
+-                {
+-                    "status": "ok",
+-                    "message": f"Lecture lancée : {selected_station.name}.",
+-                    "selected_name": selected_station.name,
+-                    "selected_station_id": selected_station.id,
+-                    "is_playing": True,
+-                }
++                {"status": "error", "message": "Action inconnue."},
++                status=400,
+             )
+ 
+-        if action == "stop":
+-            try:
+-                _stop_stream()
+-            except Exception as exc:
+-                return JsonResponse(
+-                    {"status": "error", "message": f"Impossible d'arrêter la lecture: {exc}"},
+-                    status=500,
+-                )
+-
+-            config.is_playing = False
+-            config.save(update_fields=["is_playing"])
+-            _signal_radio_daemon()
+-
++        if not done:
+             return JsonResponse(
+-                {
+-                    "status": "ok",
+-                    "message": "Lecture arrêtée.",
+-                    "selected_name": selected_station.name if selected_station else "",
+-                    "selected_station_id": selected_station.id if selected_station else None,
+-                    "is_playing": False,
+-                }
++                {"status": "error", "message": "Aucune radio sélectionnée."},
++                status=400,
+             )
+ 
+-        return JsonResponse(
+-            {"status": "error", "message": "Action inconnue."},
+-            status=400,
+-        )
++        if not _signal_radio_daemon() and action != "stop":
++            # Nobody will start the stream: do not pretend it is playing.
++            control.mark_stopped()
++            payload = control.status_payload()
++            payload["status"] = "error"
++            payload["message"] = "Le service radio ne répond pas."
++            return JsonResponse(payload, status=503)
++
++        payload = control.status_payload()
++        payload["status"] = "ok"
++        return JsonResponse(payload)
+ 
+ 
+ class RFIDDataView(TemplateView):
+diff --git a/nabweb/nabweb.service b/nabweb/nabweb.service
+index 11e53c4..29cb944 100644
+--- a/nabweb/nabweb.service
++++ b/nabweb/nabweb.service
+@@ -9,7 +9,7 @@ Restart=always
+ RestartSec=1
+ User=root
+ WorkingDirectory=/opt/pynab
+-ExecStart=/opt/pynab/venv/bin/gunicorn --timeout 60 nabweb.wsgi
++ExecStart=/opt/pynab/venv/bin/gunicorn --workers 1 --threads 4 --timeout 60 nabweb.wsgi
+ 
+ [Install]
+ WantedBy=multi-user.target
+diff --git a/nabweb/static/nabweb/css/nabweb.css b/nabweb/static/nabweb/css/nabweb.css
+index e86d604..9a45bd3 100644
+--- a/nabweb/static/nabweb/css/nabweb.css
++++ b/nabweb/static/nabweb/css/nabweb.css
+@@ -435,6 +435,104 @@ a.help-link:hover {
+   white-space: nowrap;
+ }
+ 
++/* Radio player, just above the bottom nav (see nab-player.js) */
++.nab-player {
++  position: fixed;
++  left: 0;
++  right: 0;
++  bottom: calc(64px + env(safe-area-inset-bottom));
++  z-index: 1029;
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  height: 56px;
++  padding: 0 12px 0 16px;
++  background: #1f2937;
++  color: #fff;
++  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.12);
++}
++
++.nab-player[hidden],
++.nab-player-btn[hidden] {
++  display: none;
++}
++
++body.nab-has-player {
++  padding-bottom: calc(120px + env(safe-area-inset-bottom));
++}
++
++.nab-player-dot {
++  flex: 0 0 auto;
++  width: 10px;
++  height: 10px;
++  border-radius: 999px;
++  background: #34d399;
++  animation: nab-player-pulse 1.6s ease-in-out infinite;
++}
++
++@keyframes nab-player-pulse {
++  50% {
++    opacity: 0.35;
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .nab-player-dot {
++    animation: none;
++  }
++}
++
++.nab-player-text {
++  flex: 1 1 auto;
++  min-width: 0;
++  display: flex;
++  flex-direction: column;
++  line-height: 1.2;
++}
++
++.nab-player-title,
++.nab-player-state {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.nab-player-title {
++  font-weight: 700;
++}
++
++.nab-player-state {
++  font-size: 0.78rem;
++  color: #cbd5e1;
++}
++
++.nab-player-btn {
++  flex: 0 0 auto;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 44px;
++  height: 44px;
++  padding: 0;
++  border: 0;
++  border-radius: 999px;
++  background: transparent;
++  color: #fff;
++}
++
++.nab-player-btn:hover,
++.nab-player-btn:focus {
++  background: rgba(255, 255, 255, 0.14);
++}
++
++.nab-player-btn:disabled {
++  opacity: 0.5;
++}
++
++.nab-player-stop {
++  background: rgba(255, 255, 255, 0.14);
++}
++
+ /* Forms */
+ label {
+   font-weight: 700;
+diff --git a/nabweb/static/nabweb/js/nab-player.js b/nabweb/static/nabweb/js/nab-player.js
+new file mode 100644
+index 0000000..a8699d4
+--- /dev/null
++++ b/nabweb/static/nabweb/js/nab-player.js
+@@ -0,0 +1,152 @@
++/*
++ * Radio player bar, present on every page (see _base.html).
++ *
++ * The sound comes out of the rabbit, not out of the browser: this bar is a
++ * remote control. It asks the server for the radio state and shows itself
++ * while a station is playing.
++ *
++ * Other scripts can use:
++ *   NabPlayer.send("play" | "stop" | "next" | "previous", stationId)
++ *   NabPlayer.refresh()
++ * and listen to the "nabradio:status" event on document (event.detail is
++ * the state: {is_playing, station: {id, name} | null, can_switch}).
++ */
++(function () {
++  "use strict";
++
++  var bar = document.getElementById("nab-player");
++  if (!bar || !window.fetch) {
++    return;
++  }
++
++  var POLL_PLAYING_MS = 5000;
++  var POLL_STOPPED_MS = 15000;
++  var AFTER_COMMAND_MS = 2000;
++
++  var statusUrl = bar.getAttribute("data-status-url");
++  var controlUrl = bar.getAttribute("data-control-url");
++  var csrfToken = bar.getAttribute("data-csrf");
++  var errorText = bar.getAttribute("data-error");
++  var title = bar.querySelector(".js-player-title");
++  var buttons = bar.querySelectorAll(".js-player-action");
++
++  var timer = null;
++  var current = null;
++  var signature = null;
++
++  function render(state) {
++    var playing = !!state.is_playing;
++    current = state;
++
++    bar.hidden = !playing;
++    document.body.classList.toggle("nab-has-player", playing);
++    title.textContent = state.station ? state.station.name : "";
++    for (var i = 0; i < buttons.length; i++) {
++      if (buttons[i].getAttribute("data-action") !== "stop") {
++        buttons[i].hidden = !state.can_switch;
++      }
++    }
++
++    var newSignature = JSON.stringify([playing, state.station]);
++    if (newSignature !== signature) {
++      signature = newSignature;
++      document.dispatchEvent(
++        new CustomEvent("nabradio:status", { detail: state })
++      );
++    }
++  }
++
++  function schedule(delay) {
++    clearTimeout(timer);
++    if (document.hidden) {
++      return;
++    }
++    if (delay === undefined) {
++      delay = current && current.is_playing ? POLL_PLAYING_MS : POLL_STOPPED_MS;
++    }
++    timer = setTimeout(refresh, delay);
++  }
++
++  function refresh() {
++    return fetch(statusUrl, { credentials: "same-origin", cache: "no-store" })
++      .then(function (response) {
++        if (!response.ok) {
++          throw new Error("HTTP " + response.status);
++        }
++        return response.json();
++      })
++      .then(render)
++      .catch(function () {
++        /* Rabbit unreachable: keep the last known state, try again later. */
++      })
++      .then(function () {
++        schedule();
++      });
++  }
++
++  function send(action, stationId) {
++    var body = new URLSearchParams();
++    body.append("action", action);
++    if (stationId) {
++      body.append("selected_radio", stationId);
++    }
++    return fetch(controlUrl, {
++      method: "POST",
++      credentials: "same-origin",
++      headers: { "X-CSRFToken": csrfToken },
++      body: body
++    })
++      .then(function (response) {
++        return response
++          .json()
++          .catch(function () {
++            return {};
++          })
++          .then(function (data) {
++            return { ok: response.ok, data: data };
++          });
++      })
++      .then(function (result) {
++        if (result.data && "is_playing" in result.data) {
++          render(result.data);
++        }
++        // The rabbit may refuse or fail to play: check again soon.
++        schedule(AFTER_COMMAND_MS);
++        if (!result.ok) {
++          throw new Error(result.data.message || errorText);
++        }
++        return result.data;
++      });
++  }
++
++  function showError(error) {
++    var message = (error && error.message) || errorText;
++    if (window.jQuery && window.jQuery.bootstrapGrowl) {
++      window.jQuery.bootstrapGrowl(message, { type: "danger" });
++    }
++  }
++
++  for (var i = 0; i < buttons.length; i++) {
++    buttons[i].addEventListener("click", function (event) {
++      var button = event.currentTarget;
++      button.disabled = true;
++      send(button.getAttribute("data-action"))
++        .catch(showError)
++        .then(function () {
++          button.disabled = false;
++        });
++    });
++  }
++
++  document.addEventListener("visibilitychange", function () {
++    if (document.hidden) {
++      clearTimeout(timer);
++    } else {
++      refresh();
++    }
++  });
++
++  window.NabPlayer = { send: send, refresh: refresh, showError: showError };
++
++  refresh();
++})();
+diff --git a/nabweb/templates/nabweb/_base.html b/nabweb/templates/nabweb/_base.html
+index 230e97f..9d55b5c 100644
+--- a/nabweb/templates/nabweb/_base.html
++++ b/nabweb/templates/nabweb/_base.html
+@@ -12,7 +12,7 @@
+     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
+     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
+     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
+-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=6">
++    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=7">
+ 
+     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
+ 
+@@ -23,6 +23,7 @@
+     <script src="{% static 'nabweb/js/bootstrap4-clockpicker.min.js' %}"></script>
+     <script src="{% static 'nabweb/js/jquery.bootstrap-growl.min.js' %}"></script>
+     <script src="https://cdn.jsdelivr.net/gh/xcash/bootstrap-autocomplete@v2.3.7/dist/latest/bootstrap-autocomplete.min.js"></script>
++    <script src="{% static 'nabweb/js/nab-player.js' %}?v=1" defer></script>
+   </head>
+ 
+   <body class="nab-body">
+@@ -46,6 +47,34 @@
+       </div>
+     </main>
+ 
++    {# Radio player: shown by nab-player.js while a station is playing #}
++    <div
++      class="nab-player"
++      id="nab-player"
++      role="region"
++      aria-label="{% trans 'Radio' %}"
++      data-status-url="{% url 'nabradio.status' %}"
++      data-control-url="{% url 'nabradio.control' %}"
++      data-csrf="{{ csrf_token }}"
++      data-error="{% trans 'Commande radio impossible.' %}"
++      hidden
++    >
++      <span class="nab-player-dot" aria-hidden="true"></span>
++      <span class="nab-player-text">
++        <span class="nab-player-title js-player-title"></span>
++        <span class="nab-player-state">{% trans "En lecture sur le lapin" %}</span>
++      </span>
++      <button type="button" class="nab-player-btn js-player-action" data-action="previous" aria-label="{% trans 'Station précédente' %}" title="{% trans 'Station précédente' %}">
++        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z" fill="currentColor"/></svg>
++      </button>
++      <button type="button" class="nab-player-btn nab-player-stop js-player-action" data-action="stop" aria-label="{% trans 'Arrêter la radio' %}" title="{% trans 'Arrêter la radio' %}">
++        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
++      </button>
++      <button type="button" class="nab-player-btn js-player-action" data-action="next" aria-label="{% trans 'Station suivante' %}" title="{% trans 'Station suivante' %}">
++        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z" fill="currentColor"/></svg>
++      </button>
++    </div>
++
+     <nav class="nab-bottom-nav" aria-label="{% trans 'Main navigation' %}">
+       <a class="nab-bottom-link{% if request.path == '/' %} active{% endif %}" href="/">
+         <span class="nab-bottom-icon">⌂</span>
+diff --git a/nabweb/templates/nabweb/index.html b/nabweb/templates/nabweb/index.html
+index b33dbff..bade1ef 100644
+--- a/nabweb/templates/nabweb/index.html
++++ b/nabweb/templates/nabweb/index.html
+@@ -77,9 +77,15 @@
+                 </div>
+               </div>
+ 
+-              <div class="ml-lg-3 mt-3 mt-lg-0">
+-                <form class="js-home-radio-stop-form mb-0">
++              <div class="ml-3">
++                <form class="mb-0">
+                   {% csrf_token %}
++                  <button
++                    type="button"
++                    class="btn btn-outline-primary btn-sm js-home-radio-play {% if radio_status.is_playing %}d-none{% endif %}"
++                  >
++                    {% trans "Lecture" %}
++                  </button>
+                   <button
+                     type="button"
+                     class="btn btn-outline-danger btn-sm js-home-radio-stop {% if not radio_status.is_playing %}d-none{% endif %}"
+@@ -190,6 +196,35 @@
+ 
+       const csrftoken = getCsrfToken();
+ 
++      // Radio widget: follows the player bar (nab-player.js)
++      const radioWidget = document.getElementById('home-radio-widget');
++      if (radioWidget) {
++        const radioTitle = radioWidget.querySelector('.js-home-radio-title');
++        const radioStatus = radioWidget.querySelector('.js-home-radio-status');
++        const radioPlay = radioWidget.querySelector('.js-home-radio-play');
++        const radioStop = radioWidget.querySelector('.js-home-radio-stop');
++
++        document.addEventListener('nabradio:status', function(event) {
++          const state = event.detail;
++          if (state.station) {
++            radioTitle.textContent = state.station.name;
++          }
++          radioStatus.textContent = state.is_playing ? '{% trans "En lecture" %}' : '{% trans "Arrêtée" %}';
++          radioStatus.classList.toggle('badge-success', state.is_playing);
++          radioStatus.classList.toggle('badge-secondary', !state.is_playing);
++          radioPlay.classList.toggle('d-none', state.is_playing);
++          radioStop.classList.toggle('d-none', !state.is_playing);
++        });
++
++        [[radioPlay, 'play'], [radioStop, 'stop']].forEach(function(pair) {
++          pair[0].addEventListener('click', function() {
++            if (window.NabPlayer) {
++              window.NabPlayer.send(pair[1]).catch(window.NabPlayer.showError);
++            }
++          });
++        });
++      }
++
+       if (wakeupBtn) {
+         wakeupBtn.addEventListener('click', function(e) {
+           e.preventDefault();
+diff --git a/nabweb/views.py b/nabweb/views.py
+index 8ca6ecc..ce52c31 100644
+--- a/nabweb/views.py
++++ b/nabweb/views.py
+@@ -227,9 +227,10 @@ class NabWebSettingsView(NabWebView):
+         context = BaseView.get_context(self)
+         gestalt = async_to_sync(self.query_gestalt)()
+         if gestalt["status"] == "ok":
++            hardware_info = gestalt["result"].get("hardware", {})
+             context["rfid_support"] = {
+                 "status": "ok",
+-                "available": gestalt["result"]["hardware"]["rfid"],
++                "available": bool(hardware_info.get("rfid")),
+             }
+         else:
+             context["rfid_support"] = gestalt
+@@ -262,9 +263,10 @@ class NabWebRfidView(BaseView):
+         context = super().get_context()
+         gestalt = async_to_sync(self.query_gestalt)()
+         if gestalt["status"] == "ok":
++            hardware_info = gestalt["result"].get("hardware", {})
+             rfid = {
+                 "status": "ok",
+-                "available": gestalt["result"]["hardware"]["rfid"],
++                "available": bool(hardware_info.get("rfid")),
+             }
+         else:
+             rfid = gestalt
+diff --git a/parametres-aide.patch b/parametres-aide.patch
+deleted file mode 100644
+index c52bfc0..0000000
+--- a/parametres-aide.patch
++++ /dev/null
+@@ -1,616 +0,0 @@
+-diff --git a/nabairqualityd/templates/nabairqualityd/animations_help.html b/nabairqualityd/templates/nabairqualityd/animations_help.html
+-index d310888..5cae9d9 100644
+---- a/nabairqualityd/templates/nabairqualityd/animations_help.html
+-+++ b/nabairqualityd/templates/nabairqualityd/animations_help.html
+-@@ -1,27 +1,25 @@
+--{% extends 'nabweb/_help.html' %}
+-+{% extends 'nabweb/_base.html' %}
+- {% load static %}
+- {% load i18n %}
+- 
+- {% block subtitle %}{% trans "Air quality" %}{% endblock %}
+- {% block content %}
+--     <div class="row justify-content-center">
+--      <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
+--        <div class="card" id="nabairqualityd-animations">
+--          <div class="card-header">
+--            <h5 class="card-title">{% trans "The air quality visual animations" %}</h5>
+--          </div>
+--
+--          <div class="card-body">
+--            <table>
+--              <tr>
+--                <td>{% trans "Bad" %}<img class="img-fluid" src="{% static "nabweb/images/air_bad.gif" %}"></td>
+--                <td>{% trans "Moderate" %}<img class="img-fluid" src="{% static "nabweb/images/air_middle.gif" %}"></td>
+--                <td>{% trans "Good" %}<img class="img-fluid" src="{% static "nabweb/images/air_ok.gif" %}"></td>
+--              </tr>
+--            </table>
+--          </div>
+--
+--        </div>
+--     </div>
+-+  <section class="nab-dashboard">
+-+    <a class="nab-back-link" href="{% url 'nabweb.help' %}">← {% trans "Nabaztag help" %}</a>
+-+    <div class="nab-page-head">
+-+      <div class="nab-kicker">{% trans "Aide" %}</div>
+-+      <h1 class="nab-page-title">{% trans "The air quality visual animations" %}</h1>
+-+    </div>
+-+    <div class="nab-card nab-help" id="nabairqualityd-animations">
+-+      <div class="table-responsive">
+-+        <table class="nab-help-table">
+-+          <tr>
+-+            <td>{% trans "Bad" %}<img class="img-fluid" src="{% static "nabweb/images/air_bad.gif" %}"></td>
+-+            <td>{% trans "Moderate" %}<img class="img-fluid" src="{% static "nabweb/images/air_middle.gif" %}"></td>
+-+            <td>{% trans "Good" %}<img class="img-fluid" src="{% static "nabweb/images/air_ok.gif" %}"></td>
+-+          </tr>
+-+        </table>
+-+      </div>
+-     </div>
+-+  </section>
+- {% endblock %}
+-diff --git a/nabweatherd/templates/nabweatherd/animations_help.html b/nabweatherd/templates/nabweatherd/animations_help.html
+-index cb1774b..5d069cd 100644
+---- a/nabweatherd/templates/nabweatherd/animations_help.html
+-+++ b/nabweatherd/templates/nabweatherd/animations_help.html
+-@@ -1,32 +1,30 @@
+--{% extends 'nabweb/_help.html' %}
+-+{% extends 'nabweb/_base.html' %}
+- {% load static %}
+- {% load i18n %}
+- 
+- {% block subtitle %}{% trans "Weather" %}{% endblock %}
+- {% block content %}
+--     <div class="row justify-content-center">
+--      <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
+--        <div class="card" id="nabweatherd-animations">
+--          <div class="card-header">
+--            <h5 class="card-title">{% trans "The weather forecast visual animations" %}</h5>
+--          </div>
+--
+--          <div class="card-body">
+--            <table>
+--              <tr>
+--                <td>{% trans "Sunshine" %}<img class="img-fluid" src="{% static "nabweb/images/soleil.gif" %}"></td>
+--                <td>{% trans "Rain" %}<img class="img-fluid" src="{% static "nabweb/images/pluie.gif" %}"></td>
+--                <td>{% trans "Cloudy" %}<img class="img-fluid" src="{% static "nabweb/images/nuages.gif" %}"></td>
+--              </tr>
+--              <tr>
+--                <td>{% trans "Thunderstorm" %}<img class="img-fluid" src="{% static "nabweb/images/orage.gif" %}"></td>
+--                <td>{% trans "Snow" %}<img class="img-fluid" src="{% static "nabweb/images/neige.gif" %}"></td>
+--                <td>{% trans "Rain alert" %}<img class="img-fluid" src="{% static "nabweb/images/pluie1h.gif" %}"></td>
+--              </tr>
+--            </table>
+--          </div>
+--
+--        </div>
+--     </div>
+-+  <section class="nab-dashboard">
+-+    <a class="nab-back-link" href="{% url 'nabweb.help' %}">← {% trans "Nabaztag help" %}</a>
+-+    <div class="nab-page-head">
+-+      <div class="nab-kicker">{% trans "Aide" %}</div>
+-+      <h1 class="nab-page-title">{% trans "The weather forecast visual animations" %}</h1>
+-+    </div>
+-+    <div class="nab-card nab-help" id="nabweatherd-animations">
+-+      <div class="table-responsive">
+-+        <table class="nab-help-table">
+-+          <tr>
+-+            <td>{% trans "Sunshine" %}<img class="img-fluid" src="{% static "nabweb/images/soleil.gif" %}"></td>
+-+            <td>{% trans "Rain" %}<img class="img-fluid" src="{% static "nabweb/images/pluie.gif" %}"></td>
+-+            <td>{% trans "Cloudy" %}<img class="img-fluid" src="{% static "nabweb/images/nuages.gif" %}"></td>
+-+          </tr>
+-+          <tr>
+-+            <td>{% trans "Thunderstorm" %}<img class="img-fluid" src="{% static "nabweb/images/orage.gif" %}"></td>
+-+            <td>{% trans "Snow" %}<img class="img-fluid" src="{% static "nabweb/images/neige.gif" %}"></td>
+-+            <td>{% trans "Rain alert" %}<img class="img-fluid" src="{% static "nabweb/images/pluie1h.gif" %}"></td>
+-+          </tr>
+-+        </table>
+-+      </div>
+-     </div>
+-+  </section>
+- {% endblock %}
+-diff --git a/nabweb/static/nabweb/css/nabweb.css b/nabweb/static/nabweb/css/nabweb.css
+-index 267bd06..e86d604 100644
+---- a/nabweb/static/nabweb/css/nabweb.css
+-+++ b/nabweb/static/nabweb/css/nabweb.css
+-@@ -203,6 +203,91 @@ a.help-link:hover {
+-   color: #15803d;
+- }
+- 
+-+.nab-status-warn {
+-+  color: #b45309;
+-+}
+-+
+-+/* Paramètres : cartes-liens et formulaire en ligne */
+-+.nab-quick-grid {
+-+  display: grid;
+-+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+-+  gap: 12px;
+-+}
+-+
+-+.nab-quick-card {
+-+  display: flex;
+-+  flex-direction: column;
+-+  gap: 6px;
+-+  padding: 16px;
+-+  border-radius: 16px;
+-+  background: #f9fafb;
+-+  border: 1px solid #e5e7eb;
+-+  color: #1f2937;
+-+  text-decoration: none !important;
+-+}
+-+
+-+.nab-quick-card:hover,
+-+.nab-quick-card:focus {
+-+  background: #eef2ff;
+-+  border-color: #c7d2fe;
+-+  color: #3341b5;
+-+}
+-+
+-+.nab-quick-card-title {
+-+  font-weight: 700;
+-+}
+-+
+-+.nab-quick-card-text {
+-+  font-size: 0.92rem;
+-+  color: #6b7280;
+-+}
+-+
+-+.nab-inline-form {
+-+  display: flex;
+-+  flex-wrap: wrap;
+-+  gap: 12px;
+-+}
+-+
+-+.nab-inline-form .form-control {
+-+  flex: 1 1 200px;
+-+  width: auto;
+-+}
+-+
+-+/* Aide et sous-pages */
+-+.nab-back-link {
+-+  display: inline-block;
+-+  margin-bottom: 14px;
+-+  font-weight: 600;
+-+  color: #3341b5;
+-+}
+-+
+-+.nab-help [id] {
+-+  scroll-margin-top: 90px;
+-+}
+-+
+-+.nab-help p:last-child {
+-+  margin-bottom: 0;
+-+}
+-+
+-+.nab-help-table {
+-+  width: 100%;
+-+  table-layout: fixed;
+-+}
+-+
+-+.nab-help-table td {
+-+  width: 33.33%;
+-+  padding: 10px;
+-+  text-align: center;
+-+  vertical-align: top;
+-+  border: 1px solid #e5e7eb;
+-+  font-weight: 600;
+-+}
+-+
+-+.nab-help-table img {
+-+  display: block;
+-+  margin: 8px auto 0;
+-+}
+-+
+- /* Services */
+- .nab-service-list {
+-   display: flex;
+-diff --git a/nabweb/templates/nabweb/_base.html b/nabweb/templates/nabweb/_base.html
+-index 674169e..230e97f 100644
+---- a/nabweb/templates/nabweb/_base.html
+-+++ b/nabweb/templates/nabweb/_base.html
+-@@ -12,7 +12,7 @@
+-     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
+-     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
+-     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
+--    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=5">
+-+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=6">
+- 
+-     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
+- 
+-@@ -62,7 +62,7 @@
+-         <span class="nab-bottom-label">{% trans "Système" %}</span>
+-       </a>
+- 
+--      <a class="nab-bottom-link{% if request.path == '/settings/' %} active{% endif %}" href="/settings/">
+-+      <a class="nab-bottom-link{% if request.path == '/settings/' or request.path == '/rfid/' or '/help/' in request.path %} active{% endif %}" href="/settings/">
+-         <span class="nab-bottom-icon">☰</span>
+-         <span class="nab-bottom-label">{% trans "Paramètres" %}</span>
+-       </a>
+-diff --git a/nabweb/templates/nabweb/_help.html b/nabweb/templates/nabweb/_help.html
+-deleted file mode 100644
+-index bc9311c..0000000
+---- a/nabweb/templates/nabweb/_help.html
+-+++ /dev/null
+-@@ -1,51 +0,0 @@
+--{% load static %}
+--{% load i18n %}
+--<!DOCTYPE html>
+--<html lang="fr">
+--  <head>
+--    <meta charset="utf-8">
+--    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+--    <link rel="shortcut icon" href="{% static 'nabweb/favicon/favicon.ico' %}"/>
+--    <link rel="stylesheet" href="{% static "nabweb/css/bootstrap.min.css" %}">
+--    <link rel="stylesheet/less" type="text/css" href="{% static "nabweb/css/bootstrap-button-toggle.less" %}">
+--    <link rel="stylesheet" type="text/css" href="{% static "nabweb/css/bootstrap4-clockpicker.min.css" %}">
+--    <link rel="stylesheet" type="text/css" href="{% static "nabweb/css/nabweb.css" %}">
+--    <title>{% trans "Nabaztag help" %} :: {% block subtitle %}{% endblock %}</title>
+--    <script src="{% static "nabweb/js/jquery-3.3.1.min.js" %}"></script>
+--    <script src="{% static "nabweb/js/popper.min.js" %}"></script>
+--    <script src="{% static "nabweb/js/bootstrap.min.js" %}"></script>
+--    <script src="{% static "nabweb/js/less.min.js" %}"></script>
+--    <script src="{% static "nabweb/js/bootstrap4-clockpicker.min.js" %}"></script>
+--    <script src="{% static "nabweb/js/jquery.bootstrap-growl.min.js" %}"></script>
+--
+--	<script src="https://cdn.jsdelivr.net/gh/xcash/bootstrap-autocomplete@v2.3.7/dist/latest/bootstrap-autocomplete.min.js"></script>
+--
+--    <style>
+--      table, th, td {
+--        text-align: center;
+--        vertical-align: top;
+--        border: 1px solid #dee2e6;
+--      }
+--    </style>
+--  </head>
+--  
+--  <body>
+--    <header class="navbar navbar-expand-lg navbar-light bg-light">
+--      <span class="navbar-brand mb-0 h1">{% trans "Nabaztag help" %}</span>
+--      <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+--        <span class="navbar-toggler-icon"></span>
+--      </button>
+--      <div class="collapse navbar-collapse" id="navbarSupportedContent">
+--        <ul class="navbar-nav mr-auto">
+--          <li><a class="nav-link{% if request.path == '/help/' %} active{% endif %}" href="{% if request.path == '/help/' %}#"{% else %}/help/"{% endif %}>{% trans "Home" %}{% if request.path == '/help/' %}  <span class="sr-only">{% trans "(current)" %}</span>{% endif %}</a></li>
+--        </ul>
+--        <ul class="nav navbar-nav navbar-right">
+--          <li><a class="nav-link pull-right" href="https://github.com/nabaztag2018/pynab" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><img src="{% static "nabweb/images/GitHub-Mark-32px.png" %}" title="GitHub" width="20" height="20" /></a></li>
+--        </ul>
+--      </div>
+--    </header>
+--    <div class="container-fluid mt-3">
+--        {% block content %}{% endblock %}
+--    </div>
+--  </body>
+--</html>
+-diff --git a/nabweb/templates/nabweb/help.html b/nabweb/templates/nabweb/help.html
+-index 6158aec..bf777d2 100644
+---- a/nabweb/templates/nabweb/help.html
+-+++ b/nabweb/templates/nabweb/help.html
+-@@ -1,16 +1,19 @@
+--{% extends 'nabweb/_help.html' %}
+-+{% extends 'nabweb/_base.html' %}
+- {% load i18n %}
+--{% block subtitle %}{% trans "Home" %}{% endblock %}
+-+{% block subtitle %}{% trans "Nabaztag help" %}{% endblock %}
+- {% block content %}
+--  <div class="jumbotron">
+--    <div class="container">
+--      <h1 class="display-5">{% trans "Nabaztag help" %}</h1>
+--      <hr class="my-4">
+-+  <section class="nab-dashboard">
+-+    <a class="nab-back-link" href="{% url 'nabweb.settings' %}">← {% trans "Paramètres" %}</a>
+-+    <div class="nab-page-head">
+-+      <div class="nab-kicker">{% trans "Aide" %}</div>
+-+      <h1 class="nab-page-title">{% trans "Nabaztag help" %}</h1>
+-+    </div>
+-+    <div class="nab-card nab-help">
+-       <p class="lead">{% trans "On your rabbit" %}</p>
+-       <p>{% trans "<b>The " %}<a href='/help/weather' title='{% trans "The weather forecast visual animations" %}'>{% trans "weather forecast visual animations" %}</b></a>.</p>
+-       <p>{% trans "<b>The " %}<a href='/help/airquality' title='{% trans "The air quality visual animations" %}'>{% trans "air quality visual animations" %}</b></a>.</p>
+-       <p id="asr"><b>{% trans "Talking to the rabbit (speech recognition)" %}</b><br>{% trans "You need to push and hold the button on the rabbit's head long enough to hear a 'beep', then wait a couple of seconds and speak. When you are done just release the button." %}<br>{% trans "The speech processing is done locally and the answer should come shortly!" %}</p>
+--      <p><b>{% trans "Reboot or shutdown the rabbit" %}</b><br>{% blocktrans %}You can do this cleanly by using the <kbd class="btn-warning">Reboot</kbd> or <kbd class="btn-danger">Shutdown</kbd> buttons on the <a  target='_parent' href='/system-info/'>System information</a> tab of the configuration page.{% endblocktrans %}<br>{% trans "As a last resort, you can also shutdown the rabbit by pushing its head button quickly three times in a row." %}</p>
+-+      <p><b>{% trans "Reboot or shutdown the rabbit" %}</b><br>{% blocktrans %}You can do this cleanly by using the <kbd class="btn-warning">Reboot</kbd> or <kbd class="btn-danger">Shutdown</kbd> buttons on the <a  href='/system-info/'>System information</a> tab of the configuration page.{% endblocktrans %}<br>{% trans "As a last resort, you can also shutdown the rabbit by pushing its head button quickly three times in a row." %}</p>
+-       <p><b>{% trans "Base LED pulse color" %}</b> {% trans "indicates the rabbit's network connection state" %}<br>{% blocktrans %}<span class="badge badge-pill badge-info">Fuchsia</span> means <i>all is fine</i>: rabbit has an IP address on your local network, and access to the Internet.<br><span class="badge badge-pill badge-warning">Orange</span> means <i>not so good</i>: rabbit has a local IP address, but no Internet connection (check your router).<br><span class="badge badge-pill badge-danger">Red</span> means <i>real bad</i>: rabbit has no IP address (check your WiFi access point / DHCP server).{% endblocktrans %}</p>
+-       <hr class="my-4">
+-       <p class="lead">{% trans "On the Internet" %}</p>
+-@@ -18,7 +21,6 @@
+-       <p><b>{% trans "The <a target='_blank' href='https://github.com/nabaztag2018/pynab/#readme' rel='noopener noreferrer'>GitHub repository</a>" %}</b><br>{% trans "Report bugs or contribute to the project with other developers." %}</p>
+-       <p><b>{% trans "<a target='_blank' href='https://twitter.com/nabaztagtagtag' rel='noopener noreferrer'>Nabaztag on Twitter</a>" %}</b></p>
+-       <p><b>{% trans "The <a target='_blank' href='https://www.instructables.com/member/tagtagtag/' rel='noopener noreferrer'>TagTagTag assembly instructions</a>" %}</b><br>{% trans "The open heart operation to transplant the cards into your rabbit. At this stage you probably do not need this anymore..." %}</p>
+--      <hr class="my-4">
+-     </div>
+--  </div>
+-+  </section>
+- {% endblock %}
+-diff --git a/nabweb/templates/nabweb/rfid/index.html b/nabweb/templates/nabweb/rfid/index.html
+-index 03ee3ca..d781707 100644
+---- a/nabweb/templates/nabweb/rfid/index.html
+-+++ b/nabweb/templates/nabweb/rfid/index.html
+-@@ -19,6 +19,7 @@
+-       </div>
+-     </div>
+-   </div>
+-+  <a class="nab-back-link" href="{% url 'nabweb.settings' %}">← {% trans "Paramètres" %}</a>
+-   <div class="row justify-content-center">
+-     <div class="col-xl-8 col-lg-10 col-md-10 mb-3">
+-       <div class="card">
+-diff --git a/nabweb/templates/nabweb/settings/index.html b/nabweb/templates/nabweb/settings/index.html
+-index af7a23d..6e88e33 100644
+---- a/nabweb/templates/nabweb/settings/index.html
+-+++ b/nabweb/templates/nabweb/settings/index.html
+-@@ -9,106 +9,102 @@
+-       <div class="nab-kicker">{% trans "Paramètres" %}</div>
+-       <h1 class="nab-page-title">{% trans "Paramètres" %}</h1>
+-       <p class="nab-page-intro">
+--        {% trans "Personnalisation, préférences utilisateur et accès rapides aux réglages." %}
+-+        {% trans "Langue, tags RFID / NFC et aide." %}
+-       </p>
+-     </div>
+- 
+-     <div class="row">
+--      <div class="col-12 col-xl-6 mb-4">
+--        <div class="nab-card h-100">
+-+      <div class="col-12 col-lg-6 mb-4">
+-+        <div class="nab-card">
+-           <div class="nab-section-head">
+--            <h2 class="nab-section-title">{% trans "Préférences utilisateur" %}</h2>
+-+            <h2 class="nab-section-title">{% trans "Langue" %}</h2>
+-             <p class="nab-section-text">
+--              {% trans "Centraliser ici les réglages qui concernent votre usage quotidien." %}
+-+              {% trans "Langue de cette interface et de la voix du lapin." %}
+-             </p>
+-           </div>
+- 
+--          <div class="nab-quick-grid">
+--            <a class="nab-quick-card" href="/services/">
+--              <span class="nab-quick-card-title">{% trans "Services" %}</span>
+--              <span class="nab-quick-card-text">
+--                {% trans "Configurer les services actifs, les notifications, l’agenda et les automatisations." %}
+--              </span>
+--            </a>
+--
+--            <a class="nab-quick-card" href="/rfid/">
+--              <span class="nab-quick-card-title">{% trans "RFID / NFC" %}</span>
+--              <span class="nab-quick-card-text">
+--                {% trans "Gérer les tags, les actions associées et leur personnalisation." %}
+--              </span>
+--            </a>
+--
+--            <a class="nab-quick-card" href="/help/">
+--              <span class="nab-quick-card-title">{% trans "Aide" %}</span>
+--              <span class="nab-quick-card-text">
+--                {% trans "Accéder à la documentation et aux informations utiles." %}
+--              </span>
+--            </a>
+--          </div>
+-+          {% if locale_saved %}
+-+            <div class="alert alert-success" role="alert">
+-+              {% trans "Langue enregistrée." %}
+-+            </div>
+-+          {% endif %}
+-+
+-+          <form method="post" action="{% url 'nabweb.settings' %}" class="nab-inline-form">
+-+            {% csrf_token %}
+-+            <label for="nab-locale" class="sr-only">{% trans "Langue" %}</label>
+-+            <select class="form-control" id="nab-locale" name="locale">
+-+              {% for code, name, selected in locales %}
+-+                <option value="{{ code }}"{% if selected %} selected{% endif %}>{{ name }}</option>
+-+              {% endfor %}
+-+            </select>
+-+            <button type="submit" class="btn btn-primary">
+-+              {% trans "Enregistrer" %}
+-+            </button>
+-+          </form>
+-         </div>
+-       </div>
+- 
+--      <div class="col-12 col-xl-6 mb-4">
+--        <div class="nab-card h-100">
+-+      <div class="col-12 col-lg-6 mb-4">
+-+        <div class="nab-card">
+-           <div class="nab-section-head">
+--            <h2 class="nab-section-title">{% trans "Personnalisation" %}</h2>
+-+            <h2 class="nab-section-title">{% trans "RFID / NFC" %}</h2>
+-             <p class="nab-section-text">
+--              {% trans "Organisation simple des réglages liés au comportement du Nabaztag." %}
+-+              {% trans "Associer un tag à une application du lapin." %}
+-             </p>
+-           </div>
+- 
+--          <div class="nab-status-list">
+-+          <div class="nab-status-list mb-3">
+-             <div class="nab-status-item">
+--              <span class="nab-status-label">{% trans "Langue / voix" %}</span>
+--              <span class="nab-status-value">{% trans "À regrouper ici dans une prochaine étape" %}</span>
+--            </div>
+--
+--            <div class="nab-status-item">
+--              <span class="nab-status-label">{% trans "Notifications" %}</span>
+--              <span class="nab-status-value">{% trans "Depuis les services concernés" %}</span>
+--            </div>
+--
+--            <div class="nab-status-item">
+--              <span class="nab-status-label">{% trans "Agenda" %}</span>
+--              <span class="nab-status-value">{% trans "Depuis les services concernés" %}</span>
+--            </div>
+--
+--            <div class="nab-status-item">
+--              <span class="nab-status-label">{% trans "Comportement RFID" %}</span>
+--              <span class="nab-status-value">{% trans "Depuis la page RFID / NFC" %}</span>
+-+              <span class="nab-status-label">{% trans "Lecteur" %}</span>
+-+              {% if rfid_support.status != "ok" %}
+-+                <span class="nab-status-value nab-status-warn">{% trans "Lapin injoignable" %}</span>
+-+              {% elif rfid_support.available %}
+-+                <span class="nab-status-value nab-status-ok">{% trans "Détecté" %}</span>
+-+              {% else %}
+-+                <span class="nab-status-value nab-status-warn">{% trans "Non détecté" %}</span>
+-+              {% endif %}
+-             </div>
+-           </div>
+-+
+-+          <a class="btn btn-primary" href="{% url 'nabweb.rfid' %}">
+-+            {% trans "Configurer un tag" %}
+-+          </a>
+-         </div>
+-       </div>
+- 
+-       <div class="col-12 mb-4">
+-         <div class="nab-card">
+-           <div class="nab-section-head">
+--            <h2 class="nab-section-title">{% trans "Accès rapides" %}</h2>
+-+            <h2 class="nab-section-title">{% trans "Aide" %}</h2>
+-             <p class="nab-section-text">
+--              {% trans "Les pages les plus utiles pour les préférences et la personnalisation." %}
+-+              {% trans "Comprendre ce que fait et ce que montre le lapin." %}
+-             </p>
+-           </div>
+- 
+--          <div class="nab-action-grid">
+--            <a class="btn btn-primary nab-action-btn" href="/services/">
+--              {% trans "Configurer les services" %}
+--            </a>
+--
+--            <a class="btn btn-outline-primary nab-action-btn" href="/rfid/">
+--              {% trans "Configurer RFID" %}
+-+          <div class="nab-quick-grid">
+-+            <a class="nab-quick-card" href="{% url 'nabweb.help' %}">
+-+              <span class="nab-quick-card-title">{% trans "Aide générale" %}</span>
+-+              <span class="nab-quick-card-text">
+-+                {% trans "Parler au lapin, redémarrer, couleurs du socle, liens utiles." %}
+-+              </span>
+-             </a>
+- 
+--            <a class="btn btn-outline-primary nab-action-btn" href="/system-info/">
+--              {% trans "Voir le système" %}
+-+            <a class="nab-quick-card" href="{% url 'nabweatherd.help.animations' %}">
+-+              <span class="nab-quick-card-title">{% trans "Animations météo" %}</span>
+-+              <span class="nab-quick-card-text">
+-+                {% trans "Signification des animations lumineuses de la météo." %}
+-+              </span>
+-             </a>
+- 
+--            <a class="btn btn-outline-primary nab-action-btn" href="/help/">
+--              {% trans "Ouvrir l’aide" %}
+-+            <a class="nab-quick-card" href="{% url 'nabairqualityd.help.animations' %}">
+-+              <span class="nab-quick-card-title">{% trans "Animations qualité de l’air" %}</span>
+-+              <span class="nab-quick-card-text">
+-+                {% trans "Signification des animations lumineuses de la qualité de l’air." %}
+-+              </span>
+-             </a>
+-           </div>
+-         </div>
+-       </div>
+-     </div>
+-   </section>
+--{% endblock %}
+-\ No newline at end of file
+-+{% endblock %}
+-diff --git a/nabweb/tests/nabweb_views_test.py b/nabweb/tests/nabweb_views_test.py
+-index d67f2de..fd80c99 100644
+---- a/nabweb/tests/nabweb_views_test.py
+-+++ b/nabweb/tests/nabweb_views_test.py
+-@@ -40,6 +40,37 @@ class TestView(TestCase):
+-         self.assertTrue("current_locale" in response.context)
+-         self.assertEqual(response.context["current_locale"], "en_US")
+- 
+-+    def test_get_settings(self):
+-+        c = Client()
+-+        response = c.get("/settings/")
+-+        self.assertEqual(response.status_code, 200)
+-+        self.assertEqual(
+-+            response.templates[0].name, "nabweb/settings/index.html"
+-+        )
+-+        self.assertEqual(response.context["current_locale"], "fr_FR")
+-+        self.assertTrue("locales" in response.context)
+-+        self.assertFalse(response.context["locale_saved"])
+-+        # nabd is not running in this test
+-+        self.assertEqual(response.context["rfid_support"]["status"], "error")
+-+
+-+    def test_post_settings_set_locale(self):
+-+        c = Client()
+-+        response = c.post("/settings/", {"locale": "en_US"})
+-+        self.assertEqual(response.status_code, 200)
+-+        self.assertEqual(
+-+            response.templates[0].name, "nabweb/settings/index.html"
+-+        )
+-+        self.assertEqual(response.context["current_locale"], "en_US")
+-+        self.assertTrue(response.context["locale_saved"])
+-+
+-+    def test_get_help_pages(self):
+-+        c = Client()
+-+        for url in ("/help/", "/help/weather", "/help/airquality"):
+-+            response = c.get(url)
+-+            self.assertEqual(response.status_code, 200)
+-+            template_names = [t.name for t in response.templates]
+-+            self.assertTrue("nabweb/_base.html" in template_names)
+-+
+-     def test_get_rfid(self):
+-         c = Client()
+-         response = c.get("/rfid/")
+-diff --git a/nabweb/urls.py b/nabweb/urls.py
+-index ef3c8a1..ee5b647 100644
+---- a/nabweb/urls.py
+-+++ b/nabweb/urls.py
+-@@ -14,6 +14,7 @@ from .views import (
+-     NabWebRfidView,
+-     NabWebRfidWriteView,
+-     NabWebServicesView,
+-+    NabWebSettingsView,
+-     NabWebShutdownView,
+-     NabWebSleepView,
+-     NabWebSytemInfoView,
+-@@ -34,12 +35,8 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
+-     # --- Services ---
+-     path("services/", NabWebServicesView.as_view(), name="nabweb.services"),
+- 
+--    # --- Paramètres (NOUVEAU) ---
+--    path(
+--        "settings/",
+--        TemplateView.as_view(template_name="nabweb/settings/index.html"),
+--        name="nabweb.settings",
+--    ),
+-+    # --- Paramètres ---
+-+    path("settings/", NabWebSettingsView.as_view(), name="nabweb.settings"),
+- 
+-     # --- RFID ---
+-     path("rfid/", NabWebRfidView.as_view(), name="nabweb.rfid"),
+-diff --git a/nabweb/views.py b/nabweb/views.py
+-index 5aea731..8ca6ecc 100644
+---- a/nabweb/views.py
+-+++ b/nabweb/views.py
+-@@ -211,6 +211,34 @@ class NabWebServicesView(BaseView):
+-         return context
+- 
+- 
+-+class NabWebSettingsView(NabWebView):
+-+    """
+-+    Page Paramètres : langue, RFID / NFC et aide.
+-+    Hérite de NabWebView pour réutiliser l'enregistrement de la langue
+-+    (méthode post).
+-+    """
+-+
+-+    def template_name(self):
+-+        return "nabweb/settings/index.html"
+-+
+-+    def get_context(self):
+-+        # Contexte de base uniquement (langues) : pas besoin de l'état
+-+        # radio ni de l'uptime calculés pour l'accueil.
+-+        context = BaseView.get_context(self)
+-+        gestalt = async_to_sync(self.query_gestalt)()
+-+        if gestalt["status"] == "ok":
+-+            context["rfid_support"] = {
+-+                "status": "ok",
+-+                "available": gestalt["result"]["hardware"]["rfid"],
+-+            }
+-+        else:
+-+            context["rfid_support"] = gestalt
+-+        context["locale_saved"] = (
+-+            self.request.method == "POST" and "locale" in self.request.POST
+-+        )
+-+        return context
+-+
+-+
+- class NabWebRfidView(BaseView):
+-     def template_name(self):
+-         return "nabweb/rfid/index.html"

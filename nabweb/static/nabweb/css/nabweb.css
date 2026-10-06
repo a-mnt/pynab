@@ -435,6 +435,104 @@ a.help-link:hover {
   white-space: nowrap;
 }
 
+/* Radio player, just above the bottom nav (see nab-player.js) */
+.nab-player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  z-index: 1029;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  padding: 0 12px 0 16px;
+  background: #1f2937;
+  color: #fff;
+  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.12);
+}
+
+.nab-player[hidden],
+.nab-player-btn[hidden] {
+  display: none;
+}
+
+body.nab-has-player {
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
+}
+
+.nab-player-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #34d399;
+  animation: nab-player-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes nab-player-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nab-player-dot {
+    animation: none;
+  }
+}
+
+.nab-player-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.nab-player-title,
+.nab-player-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nab-player-title {
+  font-weight: 700;
+}
+
+.nab-player-state {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.nab-player-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+}
+
+.nab-player-btn:hover,
+.nab-player-btn:focus {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.nab-player-btn:disabled {
+  opacity: 0.5;
+}
+
+.nab-player-stop {
+  background: rgba(255, 255, 255, 0.14);
+}
+
 /* Forms */
 label {
   font-weight: 700;

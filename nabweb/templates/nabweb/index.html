@@ -77,9 +77,15 @@
                 </div>
               </div>
 
-              <div class="ml-lg-3 mt-3 mt-lg-0">
-                <form class="js-home-radio-stop-form mb-0">
+              <div class="ml-3">
+                <form class="mb-0">
                   {% csrf_token %}
+                  <button
+                    type="button"
+                    class="btn btn-outline-primary btn-sm js-home-radio-play {% if radio_status.is_playing %}d-none{% endif %}"
+                  >
+                    {% trans "Lecture" %}
+                  </button>
                   <button
                     type="button"
                     class="btn btn-outline-danger btn-sm js-home-radio-stop {% if not radio_status.is_playing %}d-none{% endif %}"
@@ -189,6 +195,35 @@
       }
 
       const csrftoken = getCsrfToken();
+
+      // Radio widget: follows the player bar (nab-player.js)
+      const radioWidget = document.getElementById('home-radio-widget');
+      if (radioWidget) {
+        const radioTitle = radioWidget.querySelector('.js-home-radio-title');
+        const radioStatus = radioWidget.querySelector('.js-home-radio-status');
+        const radioPlay = radioWidget.querySelector('.js-home-radio-play');
+        const radioStop = radioWidget.querySelector('.js-home-radio-stop');
+
+        document.addEventListener('nabradio:status', function(event) {
+          const state = event.detail;
+          if (state.station) {
+            radioTitle.textContent = state.station.name;
+          }
+          radioStatus.textContent = state.is_playing ? '{% trans "En lecture" %}' : '{% trans "Arrêtée" %}';
+          radioStatus.classList.toggle('badge-success', state.is_playing);
+          radioStatus.classList.toggle('badge-secondary', !state.is_playing);
+          radioPlay.classList.toggle('d-none', state.is_playing);
+          radioStop.classList.toggle('d-none', !state.is_playing);
+        });
+
+        [[radioPlay, 'play'], [radioStop, 'stop']].forEach(function(pair) {
+          pair[0].addEventListener('click', function() {
+            if (window.NabPlayer) {
+              window.NabPlayer.send(pair[1]).catch(window.NabPlayer.showError);
+            }
+          });
+        });
+      }
 
       if (wakeupBtn) {
         wakeupBtn.addEventListener('click', function(e) {

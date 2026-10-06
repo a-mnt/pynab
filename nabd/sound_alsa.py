@@ -194,7 +194,9 @@ class SoundAlsa(Sound):  # pragma: no cover
     def _stream_mp3(self, device, url):
         mp3 = Mpg123()
         # url begins with http:// or https:// (see above)
-        response = urlopen(url)  # nosec B310
+        # Timeout so that a stalled stream ends (and can be canceled)
+        # instead of blocking the sound thread forever.
+        response = urlopen(url, timeout=10)  # nosec B310
 
         mp3chunk = response.read(4096)
         if not mp3chunk:

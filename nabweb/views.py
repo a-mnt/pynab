@@ -227,9 +227,10 @@ class NabWebSettingsView(NabWebView):
         context = BaseView.get_context(self)
         gestalt = async_to_sync(self.query_gestalt)()
         if gestalt["status"] == "ok":
+            hardware_info = gestalt["result"].get("hardware", {})
             context["rfid_support"] = {
                 "status": "ok",
-                "available": gestalt["result"]["hardware"]["rfid"],
+                "available": bool(hardware_info.get("rfid")),
             }
         else:
             context["rfid_support"] = gestalt
@@ -262,9 +263,10 @@ class NabWebRfidView(BaseView):
         context = super().get_context()
         gestalt = async_to_sync(self.query_gestalt)()
         if gestalt["status"] == "ok":
+            hardware_info = gestalt["result"].get("hardware", {})
             rfid = {
                 "status": "ok",
-                "available": gestalt["result"]["hardware"]["rfid"],
+                "available": bool(hardware_info.get("rfid")),
             }
         else:
             rfid = gestalt

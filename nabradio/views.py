@@ -1,61 +1,30 @@
-import datetime
-import json
-import socket
+import os
+import signal
 from typing import Optional
 
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, View
 
-from . import rfid_data
+from . import control, rfid_data
 from .models import Config, RadioStation
 
-
-RADIO_REQUEST_ID = "nabradio-live"
-
-
-def _send_nabd_packet(packet) -> None:
-    payload = json.dumps(packet) + "\r\n"
-    with socket.create_connection(("127.0.0.1", 10543), timeout=3) as sock:
-        sock.sendall(payload.encode("utf8"))
+RADIO_PIDFILE = "/run/nabradio.pid"
 
 
-def _play_stream(stream_url: str) -> None:
-    now = datetime.datetime.now(datetime.timezone.utc)
-    expiration = now + datetime.timedelta(hours=12)
-
-    packet = {
-        "type": "message",
-        "request_id": RADIO_REQUEST_ID,
-        "signature": {
-            "audio": ["nabradio/*.mp3"],
-        },
-        "body": [
-            {
-                "audio": [stream_url],
-            }
-        ],
-        "expiration": expiration.isoformat(),
-    }
-    _send_nabd_packet(packet)
-
-
-def _stop_stream() -> None:
-    packet = {
-        "type": "cancel",
-        "request_id": RADIO_REQUEST_ID,
-    }
-    _send_nabd_packet(packet)
-
-
-def _signal_radio_daemon() -> None:
+def _signal_radio_daemon() -> bool:
+    """
+    Tell the nabradio daemon that the desired state changed in database.
+    The daemon is the only one to talk to nabd. Return False if it is not
+    running.
+    """
     try:
-        from .nabradio import NabRadio
-
-        NabRadio.signal_daemon()
-    except Exception:
-        pass
+        with open(RADIO_PIDFILE, "r") as f:
+            os.kill(int(f.read().strip()), signal.SIGUSR1)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _all_stations():
@@ -220,12 +189,8 @@ class SettingsView(TemplateView):
                 station.stream_url = radio_url
                 station.save(update_fields=["name", "stream_url"])
 
-                if config.selected_station_id == station.id and config.is_playing:
-                    try:
-                        _play_stream(station.stream_url)
-                    except Exception:
-                        pass
-
+                # If this station is playing, the daemon restarts it with
+                # the new URL.
                 _signal_radio_daemon()
                 flash_message = "Radio modifiée."
 
@@ -306,74 +271,58 @@ class SettingsView(TemplateView):
         return render(request, self.template_name, context=context)
 
 
-class ControlView(TemplateView):
+class StatusView(View):
+    """
+    Current radio state, polled by the player shown on every page.
+    """
+
+    def get(self, request, *args, **kwargs):
+        _ensure_default_stations()
+        response = JsonResponse(control.status_payload())
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class ControlView(View):
+    """
+    Play, stop or change station. Only writes the desired state in database
+    and signals the daemon.
+    """
+
     def post(self, request, *args, **kwargs):
-        config = _get_or_create_config()
+        _ensure_default_stations()
         action = request.POST.get("action", "").strip()
-        station = _selected_station_from_request(request)
-
-        if station is not None and config.selected_station_id != station.id:
-            config.selected_station = station
-            config.save(update_fields=["selected_station"])
-
-        selected_station = config.selected_station
 
         if action == "play":
-            if selected_station is None:
-                return JsonResponse(
-                    {"status": "error", "message": "Aucune radio sélectionnée."},
-                    status=400,
-                )
-
-            try:
-                _play_stream(selected_station.stream_url)
-            except Exception as exc:
-                return JsonResponse(
-                    {"status": "error", "message": f"Impossible de lancer la lecture: {exc}"},
-                    status=500,
-                )
-
-            config.is_playing = True
-            config.save(update_fields=["is_playing"])
-            _signal_radio_daemon()
-
+            station = _selected_station_from_request(request)
+            done = control.set_playing(True, station)
+        elif action == "stop":
+            done = control.set_playing(False)
+        elif action in ("next", "previous"):
+            done = control.switch_station(action)
+        else:
             return JsonResponse(
-                {
-                    "status": "ok",
-                    "message": f"Lecture lancée : {selected_station.name}.",
-                    "selected_name": selected_station.name,
-                    "selected_station_id": selected_station.id,
-                    "is_playing": True,
-                }
+                {"status": "error", "message": "Action inconnue."},
+                status=400,
             )
 
-        if action == "stop":
-            try:
-                _stop_stream()
-            except Exception as exc:
-                return JsonResponse(
-                    {"status": "error", "message": f"Impossible d'arrêter la lecture: {exc}"},
-                    status=500,
-                )
-
-            config.is_playing = False
-            config.save(update_fields=["is_playing"])
-            _signal_radio_daemon()
-
+        if not done:
             return JsonResponse(
-                {
-                    "status": "ok",
-                    "message": "Lecture arrêtée.",
-                    "selected_name": selected_station.name if selected_station else "",
-                    "selected_station_id": selected_station.id if selected_station else None,
-                    "is_playing": False,
-                }
+                {"status": "error", "message": "Aucune radio sélectionnée."},
+                status=400,
             )
 
-        return JsonResponse(
-            {"status": "error", "message": "Action inconnue."},
-            status=400,
-        )
+        if not _signal_radio_daemon() and action != "stop":
+            # Nobody will start the stream: do not pretend it is playing.
+            control.mark_stopped()
+            payload = control.status_payload()
+            payload["status"] = "error"
+            payload["message"] = "Le service radio ne répond pas."
+            return JsonResponse(payload, status=503)
+
+        payload = control.status_payload()
+        payload["status"] = "ok"
+        return JsonResponse(payload)
 
 
 class RFIDDataView(TemplateView):

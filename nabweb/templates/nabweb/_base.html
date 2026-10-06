@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=6">
+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=7">
 
     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
 
@@ -23,6 +23,7 @@
     <script src="{% static 'nabweb/js/bootstrap4-clockpicker.min.js' %}"></script>
     <script src="{% static 'nabweb/js/jquery.bootstrap-growl.min.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/gh/xcash/bootstrap-autocomplete@v2.3.7/dist/latest/bootstrap-autocomplete.min.js"></script>
+    <script src="{% static 'nabweb/js/nab-player.js' %}?v=1" defer></script>
   </head>
 
   <body class="nab-body">
@@ -45,6 +46,34 @@
         {% block content %}{% endblock %}
       </div>
     </main>
+
+    {# Radio player: shown by nab-player.js while a station is playing #}
+    <div
+      class="nab-player"
+      id="nab-player"
+      role="region"
+      aria-label="{% trans 'Radio' %}"
+      data-status-url="{% url 'nabradio.status' %}"
+      data-control-url="{% url 'nabradio.control' %}"
+      data-csrf="{{ csrf_token }}"
+      data-error="{% trans 'Commande radio impossible.' %}"
+      hidden
+    >
+      <span class="nab-player-dot" aria-hidden="true"></span>
+      <span class="nab-player-text">
+        <span class="nab-player-title js-player-title"></span>
+        <span class="nab-player-state">{% trans "En lecture sur le lapin" %}</span>
+      </span>
+      <button type="button" class="nab-player-btn js-player-action" data-action="previous" aria-label="{% trans 'Station précédente' %}" title="{% trans 'Station précédente' %}">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z" fill="currentColor"/></svg>
+      </button>
+      <button type="button" class="nab-player-btn nab-player-stop js-player-action" data-action="stop" aria-label="{% trans 'Arrêter la radio' %}" title="{% trans 'Arrêter la radio' %}">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+      </button>
+      <button type="button" class="nab-player-btn js-player-action" data-action="next" aria-label="{% trans 'Station suivante' %}" title="{% trans 'Station suivante' %}">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z" fill="currentColor"/></svg>
+      </button>
+    </div>
 
     <nav class="nab-bottom-nav" aria-label="{% trans 'Main navigation' %}">
       <a class="nab-bottom-link{% if request.path == '/' %} active{% endif %}" href="/">

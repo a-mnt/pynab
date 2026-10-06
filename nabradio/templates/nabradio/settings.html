@@ -1,6 +1,6 @@
 {% load i18n %}
 
-<div class="card">
+<div class="card js-nabradio-card" data-playing="{{ is_playing|yesno:'1,0' }}" data-station="{{ selected_station_id|default:'' }}">
   <div class="card-header">
     <h5 class="mb-0">{% trans "Radio" %}</h5>
   </div>
@@ -218,42 +218,19 @@
       return $(element).closest(".nab-service-settings-container, .card, body");
     }
 
-    function refreshHomeRadioWidget(response) {
-      var widget = $("#home-radio-widget");
-      if (!widget.length) {
-        return;
-      }
-
-      var title = widget.find(".js-home-radio-title");
-      var status = widget.find(".js-home-radio-status");
-      var stopButton = widget.find(".js-home-radio-stop");
-
-      if (response.selected_name) {
-        title.text(response.selected_name);
-      }
-
-      if (response.is_playing) {
-        status
-          .removeClass("badge-secondary")
-          .addClass("badge-success")
-          .text("En lecture");
-        stopButton.removeClass("d-none");
-      } else {
-        status
-          .removeClass("badge-success")
-          .addClass("badge-secondary")
-          .text("Arrêtée");
-        stopButton.addClass("d-none");
-      }
+    function reloadRadioCard(root) {
+      $.get("{% url 'nabradio.settings' %}", function(html) {
+        if (root.hasClass("nab-service-settings-container")) {
+          root.html(html);
+        }
+      });
     }
 
     $(document)
       .off("click.nabradioAction")
       .on("click.nabradioAction", ".js-radio-action", function() {
         var button = $(this);
-        var form = button.closest("form");
-        form.data("clicked-action-name", button.attr("name"));
-        form.data("clicked-action-value", button.val());
+        button.closest("form").data("clicked-action-value", button.val());
       });
 
     $(document)
@@ -283,6 +260,10 @@
     $(document)
       .off("submit.nabradioSettings")
       .on("submit.nabradioSettings", ".js-nabradio-settings-form", function(event) {
+        if (event.isDefaultPrevented()) {
+          // Deletion not confirmed (see handler above).
+          return;
+        }
         event.preventDefault();
 
         var form = $(this);
@@ -298,6 +279,10 @@
             } else {
               $("body").html(html);
             }
+            // The selected station may have been edited or deleted.
+            if (window.NabPlayer) {
+              window.NabPlayer.refresh();
+            }
           },
           error: function() {
             alert("Impossible d'enregistrer la configuration radio.");
@@ -305,6 +290,7 @@
         });
       });
 
+    // Play / stop: goes through the player bar, which is then up to date.
     $(document)
       .off("submit.nabradioControl")
       .on("submit.nabradioControl", ".js-nabradio-control-form", function(event) {
@@ -312,69 +298,50 @@
 
         var form = $(this);
         var feedback = form.find(".js-nabradio-control-feedback");
-        var actionName = form.data("clicked-action-name") || "action";
-        var actionValue = form.data("clicked-action-value") || "";
-        var payload = form.serialize();
+        var action = form.data("clicked-action-value") || "play";
+        var stationId = form.find("input[name='selected_radio']").val();
 
-        if (actionValue) {
-          payload += "&" + encodeURIComponent(actionName) + "=" + encodeURIComponent(actionValue);
+        feedback.empty();
+
+        if (!window.NabPlayer) {
+          return;
         }
 
-        feedback.html("");
-
-        $.ajax({
-          url: form.attr("action"),
-          method: "POST",
-          data: payload,
-          success: function(response) {
-            refreshHomeRadioWidget(response);
-
-            var root = findRadioRoot(form);
-            $.get("{% url 'nabradio.settings' %}", function(html) {
-              if (root.hasClass("nab-service-settings-container")) {
-                root.html(html);
-              }
-            });
+        window.NabPlayer.send(action, stationId).then(
+          function() {
+            reloadRadioCard(findRadioRoot(form));
           },
-          error: function(xhr) {
-            var message = "Action impossible.";
-            if (xhr.responseJSON && xhr.responseJSON.message) {
-              message = xhr.responseJSON.message;
-            }
-
-            feedback.html(
-              '<div class="alert alert-danger mb-0" role="alert">' +
-                message +
-              '</div>'
+          function(error) {
+            feedback.empty().append(
+              $('<div class="alert alert-danger mb-0" role="alert"></div>').text(error.message)
             );
           }
-        });
+        );
       });
 
+    // Radio stopped or changed from elsewhere (player bar, rabbit button,
+    // end of stream): refresh this card, unless something is being typed.
     $(document)
-      .off("click.homeRadioStop")
-      .on("click.homeRadioStop", ".js-home-radio-stop", function(event) {
-        event.preventDefault();
+      .off("nabradio:status.nabradioCard")
+      .on("nabradio:status.nabradioCard", function(event) {
+        var state = event.originalEvent.detail;
+        var card = $(".js-nabradio-card");
+        var root = card.closest(".nab-service-settings-container");
+        if (!card.length || !root.length) {
+          return;
+        }
 
-        $.ajax({
-          url: "{% url 'nabradio.control' %}",
-          method: "POST",
-          data: {
-            csrfmiddlewaretoken: $("input[name='csrfmiddlewaretoken']").first().val(),
-            action: "stop",
-            selected_radio: "{{ selected_station_id|default:'' }}"
-          },
-          success: function(response) {
-            refreshHomeRadioWidget(response);
+        var playing = state.is_playing ? "1" : "0";
+        var station = state.station ? String(state.station.id) : "";
+        if (String(card.data("playing")) === playing && String(card.data("station")) === station) {
+          return;
+        }
 
-            var root = $(".nab-service-settings-container[data-service='nabradio']");
-            if (root.length) {
-              $.get("{% url 'nabradio.settings' %}", function(html) {
-                root.html(html);
-              });
-            }
-          }
-        });
+        var editing = card.find(".js-edit-radio-panel:visible").length > 0 ||
+          $("#nabradio-radio-name").val() || $("#nabradio-radio-url").val();
+        if (!editing) {
+          reloadRadioCard(root);
+        }
       });
   })();
 </script>

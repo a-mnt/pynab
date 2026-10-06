@@ -1,120 +1,170 @@
+import asyncio
 import datetime
 import json
 import logging
 import sys
 from typing import Optional
 
+from asgiref.sync import sync_to_async
+
 from nabcommon.nabservice import NabService
 
-from . import rfid_data
-from .models import Config, RadioStation
+from . import control, rfid_data
 
+# A single request id: nabd plays one radio message at a time, and a fixed id
+# lets a restarted daemon cancel a stream left over by the previous one.
 RADIO_REQUEST_ID = "nabradio-live"
+# nabd only checks expiration when it takes the message out of its queue. If
+# the rabbit is asleep or busy for longer than this, the radio is dropped
+# instead of starting much later, out of the blue.
+START_TIMEOUT_SECONDS = 30
+# nabd refuses to cancel a message that is still waiting in its queue.
+CANCEL_RETRY_SECONDS = 1
 EARS_STEPS = 17
+# Value returned by rfid_data when a tag has no stream associated.
+RFID_NO_STREAM = "NO_EVENT_NAME"
+CANCEL_REFUSED_CLASSES = ("NotPlaying", "NotCancelable")
 
 
 class NabRadio(NabService):
+    """
+    Radio daemon.
+
+    The website writes the desired state in database (see control.py) and
+    sends SIGUSR1. This daemon is the only one to talk to nabd: it starts and
+    cancels the stream so that what plays matches the desired state, and it
+    listens to nabd responses to know when playback really ended (stopped
+    from the button, stream error, end of stream...).
+    """
+
     def __init__(self):
         super().__init__()
-        self.is_playing = False
-        self.current_station_id: Optional[int] = None
-        self.current_stream_url = ""
+        # True from the moment a message is sent to nabd until nabd reports
+        # it ended. The message may be playing or still in nabd's queue.
+        self.active = False
+        self.active_url = ""
+        self.cancel_sent = False
+        # False until the startup cleanup is done.
+        self.ready = False
         self.right_ear_position: Optional[int] = None
+        self._lock: Optional[asyncio.Lock] = None
+        self._retry_task: Optional[asyncio.Future] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        # Created lazily so that it is bound to the running event loop.
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def _send_packet(self, packet):
         assert self.writer is not None
         self.writer.write((json.dumps(packet) + "\r\n").encode("utf8"))
         await self.writer.drain()
 
-    async def _launch_radio(self, streaming_url: str):
-        logging.info("nabradio: play %s", streaming_url)
+    async def _launch(self, stream_url: str):
+        logging.info("nabradio: play %s", stream_url)
         now = datetime.datetime.now(datetime.timezone.utc)
-        expiration = now + datetime.timedelta(hours=12)
-
-        packet = {
-            "type": "message",
-            "request_id": RADIO_REQUEST_ID,
-            "signature": {
-                "audio": ["nabradio/*.mp3"],
-            },
-            "body": [
-                {
-                    "audio": [streaming_url],
-                }
-            ],
-            "expiration": expiration.isoformat(),
-        }
-        await self._send_packet(packet)
-
-    async def _stop_radio(self):
-        logging.info("nabradio: stop")
-        packet = {
-            "type": "cancel",
-            "request_id": RADIO_REQUEST_ID,
-        }
-        await self._send_packet(packet)
-
-    async def _load_state(self):
-        config = await Config.load_async()
-        stations = []
-        async for station in RadioStation.objects.filter(is_active=True).order_by("position", "id"):
-            stations.append(station)
-
-        selected_station = config.selected_station
-        if selected_station is None and stations:
-            selected_station = stations[0]
-            config.selected_station = selected_station
-            await config.save_async()
-
-        return config, stations, selected_station
-
-    async def _apply_state(self):
-        config, stations, selected_station = await self._load_state()
-
-        desired_playing = bool(config.is_playing)
-        desired_station_id = selected_station.id if selected_station else None
-        desired_stream_url = selected_station.stream_url if selected_station else ""
-
-        if desired_playing and selected_station is not None:
-            if (not self.is_playing) or (self.current_stream_url != desired_stream_url):
-                await self._launch_radio(desired_stream_url)
-        else:
-            if self.is_playing:
-                await self._stop_radio()
-
-        self.is_playing = desired_playing
-        self.current_station_id = desired_station_id
-        self.current_stream_url = desired_stream_url
-
-    async def reload_config(self):
-        await self._apply_state()
-
-    async def _set_selected_station(self, station: RadioStation, play: bool):
-        config = await Config.load_async()
-        config.selected_station = station
-        config.is_playing = play
-        await config.save_async()
-        await self._apply_state()
-
-    async def _switch_station(self, direction: str):
-        config, stations, selected_station = await self._load_state()
-        if not stations or selected_station is None:
-            return
-
-        current_index = next(
-            (index for index, station in enumerate(stations) if station.id == selected_station.id),
-            0,
+        expiration = now + datetime.timedelta(seconds=START_TIMEOUT_SECONDS)
+        self.active = True
+        self.active_url = stream_url
+        self.cancel_sent = False
+        await self._send_packet(
+            {
+                "type": "message",
+                "request_id": RADIO_REQUEST_ID,
+                "signature": {"audio": ["nabradio/*.mp3"]},
+                "body": [{"audio": [stream_url]}],
+                "expiration": expiration.isoformat(),
+            }
         )
 
-        if direction == "next":
-            new_index = (current_index + 1) % len(stations)
-        else:
-            new_index = (current_index - 1) % len(stations)
+    async def _cancel(self):
+        logging.info("nabradio: stop %s", self.active_url)
+        self.cancel_sent = True
+        await self._send_packet(
+            {"type": "cancel", "request_id": RADIO_REQUEST_ID}
+        )
 
-        config.selected_station = stations[new_index]
-        config.is_playing = True
-        await config.save_async()
-        await self._apply_state()
+    async def _reconcile(self):
+        """
+        Make nabd play what the database says should be playing.
+        Must be called with the lock held.
+        """
+        want_playing, stream_url = await sync_to_async(control.get_desired)()
+        if not self.active:
+            if want_playing and stream_url:
+                await self._launch(stream_url)
+        elif not want_playing or stream_url != self.active_url:
+            # Stop, or change of station: the current stream must end first.
+            # The new station is started when nabd confirms the end.
+            if not self.cancel_sent:
+                await self._cancel()
+
+    async def reload_config(self):
+        async with self._get_lock():
+            if self.ready:
+                await self._reconcile()
+
+    async def _startup(self):
+        """
+        Nothing can be playing on our behalf when we start, except a stream
+        left over by a previous instance of this daemon: cancel it, and
+        record that the radio is stopped.
+        """
+        async with self._get_lock():
+            await sync_to_async(control.mark_stopped)()
+            await self._send_packet(
+                {"type": "cancel", "request_id": RADIO_REQUEST_ID}
+            )
+            self.ready = True
+
+    async def _retry_later(self):
+        await asyncio.sleep(CANCEL_RETRY_SECONDS)
+        self._retry_task = None
+        try:
+            await self.reload_config()
+        except Exception as err:  # connection to nabd lost meanwhile
+            logging.debug("nabradio: retry failed: %s", err)
+
+    async def _process_response(self, packet):
+        async with self._get_lock():
+            if not self.active:
+                # Answer to the startup cancel, or to a cancel that crossed
+                # the end of the stream.
+                return
+
+            status = packet.get("status")
+            if status == "error" and (
+                packet.get("class") in CANCEL_REFUSED_CLASSES
+            ):
+                # Our message is still in nabd's queue: try again shortly.
+                self.cancel_sent = False
+                if self._retry_task is None:
+                    self._retry_task = asyncio.ensure_future(
+                        self._retry_later()
+                    )
+                return
+
+            # Any other response means the message is over: played to the
+            # end, canceled, expired before starting, or failed.
+            ended_url = self.active_url
+            canceled_by_us = self.cancel_sent
+            self.active = False
+            self.active_url = ""
+            self.cancel_sent = False
+            logging.info("nabradio: ended (%s) %s", status, ended_url)
+
+            if not canceled_by_us:
+                # Stopped from the rabbit's button, stream error or end of
+                # stream. Unless another station was asked for meanwhile,
+                # the radio is now stopped.
+                want_playing, stream_url = await sync_to_async(
+                    control.get_desired
+                )()
+                if want_playing and stream_url == ended_url:
+                    await sync_to_async(control.mark_stopped)()
+
+            await self._reconcile()
 
     async def _handle_right_ear_rotation(self, new_position: int):
         if self.right_ear_position is None:
@@ -130,50 +180,41 @@ class NabRadio(NabService):
         if delta == 0:
             return
 
-        if delta <= EARS_STEPS // 2:
-            await self._switch_station("next")
-        else:
-            await self._switch_station("previous")
-
-    async def _play_rfid_station(self, streaming_url: str):
-        station = await RadioStation.objects.filter(stream_url=streaming_url).afirst()
-
-        if station is None:
-            last_station = await RadioStation.objects.order_by("-position", "-id").afirst()
-            next_position = (last_station.position + 1) if last_station else 0
-            station = await RadioStation.objects.acreate(
-                name="Station RFID",
-                stream_url=streaming_url,
-                position=next_position,
-                is_favorite=False,
-                is_active=True,
-            )
-
-        await self._set_selected_station(station, True)
+        direction = "next" if delta <= EARS_STEPS // 2 else "previous"
+        if await sync_to_async(control.switch_station)(direction):
+            await self.reload_config()
 
     async def process_nabd_packet(self, packet):
         packet_type = packet.get("type")
+
+        if (
+            packet_type == "response"
+            and packet.get("request_id") == RADIO_REQUEST_ID
+        ):
+            await self._process_response(packet)
+            return
 
         if (
             packet_type == "rfid_event"
             and packet.get("app") == "nabradio"
             and packet.get("event") == "detected"
         ):
-            streaming_url = await rfid_data.read_data_ui(packet["uid"])
-            if streaming_url:
-                await self._play_rfid_station(streaming_url)
+            stream_url = await rfid_data.read_data_ui(packet["uid"])
+            if stream_url and stream_url != RFID_NO_STREAM:
+                await sync_to_async(control.play_stream_url)(stream_url)
+                await self.reload_config()
             return
 
         if packet_type == "ears_event":
             right_position = packet.get("right")
             if isinstance(right_position, int):
-                if self.is_playing:
+                if self.active:
                     await self._handle_right_ear_rotation(right_position)
                 else:
                     self.right_ear_position = right_position
 
-    async def start_service_loop(self, loop):
-        loop.create_task(self.reload_config())
+    def start_service_loop(self, loop):
+        loop.create_task(self._startup())
         return None
 
 
