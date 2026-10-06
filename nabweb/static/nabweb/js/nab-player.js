@@ -1,9 +1,9 @@
 /*
- * Radio player bar, present on every page (see _base.html).
+ * Radio player bar, always visible on every page (see _base.html).
  *
  * The sound comes out of the rabbit, not out of the browser: this bar is a
- * remote control. It asks the server for the radio state and shows itself
- * while a station is playing.
+ * remote control. It asks the server for the radio state, shows the selected
+ * station, and starts or stops it.
  *
  * Other scripts can use:
  *   NabPlayer.send("play" | "stop" | "next" | "previous", stationId)
@@ -22,13 +22,16 @@
   var POLL_PLAYING_MS = 5000;
   var POLL_STOPPED_MS = 15000;
   var AFTER_COMMAND_MS = 2000;
+  var STORAGE_KEY = "nabradio.status";
 
   var statusUrl = bar.getAttribute("data-status-url");
   var controlUrl = bar.getAttribute("data-control-url");
   var csrfToken = bar.getAttribute("data-csrf");
   var errorText = bar.getAttribute("data-error");
   var title = bar.querySelector(".js-player-title");
-  var buttons = bar.querySelectorAll(".js-player-action");
+  var stateText = bar.querySelector(".js-player-state");
+  var toggle = bar.querySelector(".js-player-toggle");
+  var switchButtons = bar.querySelectorAll(".js-player-action");
 
   var timer = null;
   var current = null;
@@ -38,13 +41,31 @@
     var playing = !!state.is_playing;
     current = state;
 
-    bar.hidden = !playing;
-    document.body.classList.toggle("nab-has-player", playing);
-    title.textContent = state.station ? state.station.name : "";
-    for (var i = 0; i < buttons.length; i++) {
-      if (buttons[i].getAttribute("data-action") !== "stop") {
-        buttons[i].hidden = !state.can_switch;
-      }
+    bar.classList.toggle("is-playing", playing);
+    if (state.station) {
+      title.textContent = state.station.name;
+      stateText.textContent = bar.getAttribute(
+        playing ? "data-text-playing" : "data-text-stopped"
+      );
+    } else {
+      title.textContent = bar.getAttribute("aria-label");
+      stateText.textContent = bar.getAttribute("data-text-none");
+    }
+    toggle.disabled = !state.station;
+    toggle.setAttribute(
+      "aria-label",
+      bar.getAttribute(playing ? "data-label-stop" : "data-label-play")
+    );
+    for (var i = 0; i < switchButtons.length; i++) {
+      switchButtons[i].hidden = !state.can_switch;
+    }
+
+    // Remembered so that the next page shows the bar right away, before
+    // the rabbit has answered.
+    try {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      /* storage unavailable: not a problem */
     }
 
     var newSignature = JSON.stringify([playing, state.station]);
@@ -126,16 +147,26 @@
     }
   }
 
-  for (var i = 0; i < buttons.length; i++) {
-    buttons[i].addEventListener("click", function (event) {
-      var button = event.currentTarget;
+  function onClick(button, getAction) {
+    button.addEventListener("click", function () {
       button.disabled = true;
-      send(button.getAttribute("data-action"))
+      send(getAction())
         .catch(showError)
         .then(function () {
-          button.disabled = false;
+          button.disabled = !(current && current.station);
         });
     });
+  }
+
+  onClick(toggle, function () {
+    return current && current.is_playing ? "stop" : "play";
+  });
+  for (var i = 0; i < switchButtons.length; i++) {
+    (function (button) {
+      onClick(button, function () {
+        return button.getAttribute("data-action");
+      });
+    })(switchButtons[i]);
   }
 
   document.addEventListener("visibilitychange", function () {
@@ -148,5 +179,14 @@
 
   window.NabPlayer = { send: send, refresh: refresh, showError: showError };
 
+  // Show the last known state at once, then ask the rabbit.
+  try {
+    var remembered = window.sessionStorage.getItem(STORAGE_KEY);
+    if (remembered) {
+      render(JSON.parse(remembered));
+    }
+  } catch (e) {
+    /* nothing remembered */
+  }
   refresh();
 })();

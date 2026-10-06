@@ -110,9 +110,62 @@
   }
 
   .nab-radio-item.is-playing .nab-radio-state-playing {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: #3341b5;
     font-weight: 600;
+  }
+
+  /* Equalizer moving on the row being played */
+  .nab-radio-eq {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    width: 13px;
+    height: 12px;
+  }
+
+  .nab-radio-eq i {
+    flex: 1 1 0;
+    height: 100%;
+    border-radius: 1px;
+    background: #3341b5;
+    transform: scaleY(0.25);
+    transform-origin: bottom;
+    animation: nab-radio-eq 0.8s ease-in-out infinite alternate;
+  }
+
+  .nab-radio-eq i:nth-child(2) {
+    animation-duration: 0.55s;
+    animation-delay: -0.3s;
+  }
+
+  .nab-radio-eq i:nth-child(3) {
+    animation-duration: 0.7s;
+    animation-delay: -0.5s;
+  }
+
+  @keyframes nab-radio-eq {
+    0% {
+      transform: scaleY(0.25);
+    }
+
+    100% {
+      transform: scaleY(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nab-radio-eq i {
+      animation: none;
+      transform: scaleY(0.7);
+    }
+
+    .nab-radio-eq i:nth-child(2) {
+      transform: scaleY(0.4);
+    }
   }
 
   .nab-radio-panel {
@@ -197,7 +250,7 @@
                 {% if radio.is_favorite %}<span class="nab-radio-star" title="{% trans 'Favori' %}">★</span>{% endif %}
                 {{ radio.name }}
               </span>
-              <span class="nab-radio-state nab-radio-state-playing">{% trans "En lecture" %}</span>
+              <span class="nab-radio-state nab-radio-state-playing"><span class="nab-radio-eq" aria-hidden="true"><i></i><i></i><i></i></span>{% trans "En lecture" %}</span>
               <span class="nab-radio-state nab-radio-state-selected">{% trans "Sélectionnée" %}</span>
             </div>
 

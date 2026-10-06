@@ -10,7 +10,8 @@ body.nab-body {
   color: #1f2937;
   font-size: 16px;
   line-height: 1.5;
-  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  /* room for the bottom nav (64px) and the radio player (56px) */
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
 }
 
 a {
@@ -435,7 +436,7 @@ a.help-link:hover {
   white-space: nowrap;
 }
 
-/* Radio player, just above the bottom nav (see nab-player.js) */
+/* Radio player, always visible just above the bottom nav (nab-player.js) */
 .nab-player {
   position: fixed;
   left: 0;
@@ -452,33 +453,71 @@ a.help-link:hover {
   box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.12);
 }
 
-.nab-player[hidden],
 .nab-player-btn[hidden] {
   display: none;
 }
 
-body.nab-has-player {
-  padding-bottom: calc(120px + env(safe-area-inset-bottom));
-}
-
-.nab-player-dot {
+/* Equalizer: still when stopped, moving while the rabbit plays */
+.nab-player-eq {
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #34d399;
-  animation: nab-player-pulse 1.6s ease-in-out infinite;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  width: 21px;
+  height: 18px;
 }
 
-@keyframes nab-player-pulse {
-  50% {
-    opacity: 0.35;
+.nab-player-eq i {
+  flex: 1 1 0;
+  height: 100%;
+  border-radius: 2px;
+  background: #64748b;
+  transform: scaleY(0.2);
+  transform-origin: bottom;
+}
+
+.nab-player.is-playing .nab-player-eq i {
+  background: #34d399;
+  animation: nab-eq 0.9s ease-in-out infinite alternate;
+}
+
+.nab-player.is-playing .nab-player-eq i:nth-child(1) {
+  animation-duration: 0.8s;
+}
+
+.nab-player.is-playing .nab-player-eq i:nth-child(2) {
+  animation-duration: 0.55s;
+  animation-delay: -0.3s;
+}
+
+.nab-player.is-playing .nab-player-eq i:nth-child(3) {
+  animation-duration: 0.7s;
+  animation-delay: -0.5s;
+}
+
+.nab-player.is-playing .nab-player-eq i:nth-child(4) {
+  animation-duration: 0.6s;
+  animation-delay: -0.15s;
+}
+
+@keyframes nab-eq {
+  0% {
+    transform: scaleY(0.2);
+  }
+
+  100% {
+    transform: scaleY(1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nab-player-dot {
+  .nab-player.is-playing .nab-player-eq i {
     animation: none;
+    transform: scaleY(0.7);
+  }
+
+  .nab-player.is-playing .nab-player-eq i:nth-child(odd) {
+    transform: scaleY(0.4);
   }
 }
 
@@ -529,8 +568,23 @@ body.nab-has-player {
   opacity: 0.5;
 }
 
-.nab-player-stop {
+/* Main button: play when stopped, stop while playing */
+.nab-player-main {
   background: rgba(255, 255, 255, 0.14);
+}
+
+.nab-player.is-playing .nab-player-main {
+  background: #fff;
+  color: #1f2937;
+}
+
+.nab-player-icon-stop,
+.nab-player.is-playing .nab-player-icon-play {
+  display: none;
+}
+
+.nab-player.is-playing .nab-player-icon-stop {
+  display: block;
 }
 
 /* Forms */

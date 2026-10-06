@@ -1,12 +1,15 @@
 import asyncio
 import json
+import os
 import threading
 import time
+from unittest import mock
 
 from django.http import JsonResponse
 from django.test import Client, TestCase
 
 from nabcommon import nabservice
+from nabweb import views
 
 
 class TestView(TestCase):
@@ -95,6 +98,61 @@ class TestView(TestCase):
         self.assertFalse("nabmastodond" in response.context["services"])
         self.assertTrue("current_locale" in response.context)
         self.assertEqual(response.context["current_locale"], "fr_FR")
+
+
+class TestGitInfo(TestCase):
+    def test_git_runs_as_repository_owner(self):
+        """
+        The web server runs as root and repositories belong to another
+        user: git refuses to read them ("dubious ownership") unless it is
+        run as their owner.
+        """
+        other_uid = str(os.geteuid() + 1)
+        with mock.patch(
+            "nabweb.views._run_command", return_value=(0, "abc", "")
+        ) as run_mock:
+            views.GitInfo._git("/repo", "rev-parse", "HEAD", sudo_uid=other_uid)
+            views.GitInfo._git(
+                "/repo", "rev-parse", "HEAD", sudo_uid=str(os.geteuid())
+            )
+        self.assertEqual(
+            run_mock.call_args_list[0][0][0],
+            ["sudo", "-u", f"#{other_uid}"]
+            + ["git", "-C", "/repo", "rev-parse", "HEAD"],
+        )
+        # No sudo needed when the repository is ours.
+        self.assertEqual(
+            run_mock.call_args_list[1][0][0],
+            ["git", "-C", "/repo", "rev-parse", "HEAD"],
+        )
+
+    def test_repository_info_uses_owner_for_every_command(self):
+        commands = []
+
+        def fake_run(cmd, cwd=None):
+            commands.append(cmd)
+            return (0, "1", "")
+
+        other_uid = os.geteuid() + 1
+        with mock.patch("nabweb.views._run_command", side_effect=fake_run):
+            with mock.patch("nabweb.views.os.stat") as stat_mock:
+                stat_mock.return_value.st_uid = other_uid
+                info = views.GitInfo.do_get_repository_info(
+                    "pynab", ".", force=True
+                )
+        self.assertEqual(info["status"], "ok")
+        self.assertTrue(len(commands) >= 8)
+        for cmd in commands:
+            self.assertEqual(cmd[:3], ["sudo", "-u", f"#{other_uid}"])
+
+    def test_error_message_includes_git_error(self):
+        with mock.patch(
+            "nabweb.views._run_command",
+            return_value=(128, "", "fatal: detected dubious ownership"),
+        ):
+            info = views.GitInfo.do_get_repository_info("pynab", ".")
+        self.assertEqual(info["status"], "error")
+        self.assertTrue("dubious ownership" in info["message"])
 
 
 class TestNabdClientBase(TestCase):

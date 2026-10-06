@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
     <link rel="stylesheet/less" type="text/css" href="{% static 'nabweb/css/bootstrap-button-toggle.less' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/bootstrap4-clockpicker.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=7">
+    <link rel="stylesheet" type="text/css" href="{% static 'nabweb/css/nabweb.css' %}?v=8">
 
     <title>{% trans "Nabaztag configuration" %} · {% block subtitle %}{% endblock %}</title>
 
@@ -23,7 +23,7 @@
     <script src="{% static 'nabweb/js/bootstrap4-clockpicker.min.js' %}"></script>
     <script src="{% static 'nabweb/js/jquery.bootstrap-growl.min.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/gh/xcash/bootstrap-autocomplete@v2.3.7/dist/latest/bootstrap-autocomplete.min.js"></script>
-    <script src="{% static 'nabweb/js/nab-player.js' %}?v=1" defer></script>
+    <script src="{% static 'nabweb/js/nab-player.js' %}?v=2" defer></script>
   </head>
 
   <body class="nab-body">
@@ -47,7 +47,7 @@
       </div>
     </main>
 
-    {# Radio player: shown by nab-player.js while a station is playing #}
+    {# Radio player: always visible, kept in sync with the rabbit by nab-player.js #}
     <div
       class="nab-player"
       id="nab-player"
@@ -57,20 +57,25 @@
       data-control-url="{% url 'nabradio.control' %}"
       data-csrf="{{ csrf_token }}"
       data-error="{% trans 'Commande radio impossible.' %}"
-      hidden
+      data-text-playing="{% trans 'En lecture sur le lapin' %}"
+      data-text-stopped="{% trans 'À l’arrêt' %}"
+      data-text-none="{% trans 'Aucune radio enregistrée' %}"
+      data-label-play="{% trans 'Lancer la radio' %}"
+      data-label-stop="{% trans 'Arrêter la radio' %}"
     >
-      <span class="nab-player-dot" aria-hidden="true"></span>
+      <span class="nab-player-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       <span class="nab-player-text">
-        <span class="nab-player-title js-player-title"></span>
-        <span class="nab-player-state">{% trans "En lecture sur le lapin" %}</span>
+        <span class="nab-player-title js-player-title">{% trans "Radio" %}</span>
+        <span class="nab-player-state js-player-state">&nbsp;</span>
       </span>
-      <button type="button" class="nab-player-btn js-player-action" data-action="previous" aria-label="{% trans 'Station précédente' %}" title="{% trans 'Station précédente' %}">
+      <button type="button" class="nab-player-btn js-player-action" data-action="previous" aria-label="{% trans 'Station précédente' %}" title="{% trans 'Station précédente' %}" hidden>
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z" fill="currentColor"/></svg>
       </button>
-      <button type="button" class="nab-player-btn nab-player-stop js-player-action" data-action="stop" aria-label="{% trans 'Arrêter la radio' %}" title="{% trans 'Arrêter la radio' %}">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+      <button type="button" class="nab-player-btn nab-player-main js-player-toggle" aria-label="{% trans 'Lancer la radio' %}" disabled>
+        <svg class="nab-player-icon-play" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+        <svg class="nab-player-icon-stop" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
       </button>
-      <button type="button" class="nab-player-btn js-player-action" data-action="next" aria-label="{% trans 'Station suivante' %}" title="{% trans 'Station suivante' %}">
+      <button type="button" class="nab-player-btn js-player-action" data-action="next" aria-label="{% trans 'Station suivante' %}" title="{% trans 'Station suivante' %}" hidden>
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z" fill="currentColor"/></svg>
       </button>
     </div>

@@ -111,3 +111,6 @@ tmp/
 
 # nabblockly subdirectory
 /nabblockly/
+
+# Patch files applied with "git apply" are not part of the project
+*.patch

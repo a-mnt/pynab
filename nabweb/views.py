@@ -599,8 +599,17 @@ class GitInfo:
 
     @staticmethod
     def _git(repo_dir, *args, sudo_uid=None):
+        """
+        Run a git command in a repository.
+
+        The web server runs as root while repositories belong to another
+        user (pi). Since git 2.35.2 (and Debian security updates of older
+        versions), git refuses to work in a repository owned by someone
+        else ("dubious ownership"). So every command is run as the owner
+        of the repository, given in sudo_uid.
+        """
         cmd = ["git", "-C", repo_dir, *args]
-        if sudo_uid is not None:
+        if sudo_uid is not None and str(sudo_uid) != str(os.geteuid()):
             cmd = ["sudo", "-u", f"#{sudo_uid}"] + cmd
         return _run_command(cmd)
 
@@ -657,11 +666,18 @@ class GitInfo:
                 "name": GitInfo.NAMES[repository],
             }
 
-        rc, head_sha1, _ = GitInfo._git(repo_dir, "rev-parse", "HEAD")
+        def git(*args):
+            return GitInfo._git(repo_dir, *args, sudo_uid=repo_owner)
+
+        rc, head_sha1, git_error = git("rev-parse", "HEAD")
         if rc != 0 or head_sha1 == "":
+            message = "Cannot get HEAD - not a git repository?"
+            if git_error:
+                # Say what git complained about, to make this diagnosable.
+                message += f" ({git_error.splitlines()[0]})"
             return {
                 "status": "error",
-                "message": "Cannot get HEAD - not a git repository?",
+                "message": message,
                 "info_date": datetime.datetime.now(),
                 "name": GitInfo.NAMES[repository],
             }
@@ -672,33 +688,31 @@ class GitInfo:
             "info_date": datetime.datetime.now(),
         }
 
-        _, branch, _ = GitInfo._git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        _, branch, _ = git("rev-parse", "--abbrev-ref", "HEAD")
         info["branch"] = branch
 
-        _, upstream_branch, _ = GitInfo._git(
-            repo_dir, "rev-parse", "--abbrev-ref", "@{upstream}"
-        )
+        _, upstream_branch, _ = git("rev-parse", "--abbrev-ref", "@{upstream}")
         info["upstream_branch"] = upstream_branch
 
         remote = upstream_branch.split("/")[0] if upstream_branch else ""
         if remote:
-            _, url, _ = GitInfo._git(repo_dir, "remote", "get-url", remote)
+            _, url, _ = git("remote", "get-url", remote)
         else:
             url = ""
         info["url"] = url
 
-        rc, _, _ = GitInfo._git(repo_dir, "diff-index", "--quiet", "HEAD", "--")
+        rc, _, _ = git("diff-index", "--quiet", "HEAD", "--")
         info["local_changes"] = rc != 0
 
         if force and upstream_branch:
-            GitInfo._git(repo_dir, "fetch", "-t", "-f", sudo_uid=repo_owner)
+            git("fetch", "-t", "-f")
 
         if upstream_branch:
-            rc, commits_count, _ = GitInfo._git(
-                repo_dir, "rev-list", "--count", f"HEAD..{upstream_branch}"
+            rc, commits_count, _ = git(
+                "rev-list", "--count", f"HEAD..{upstream_branch}"
             )
-            _, local_commits_count, _ = GitInfo._git(
-                repo_dir, "rev-list", "--count", f"{upstream_branch}..HEAD"
+            _, local_commits_count, _ = git(
+                "rev-list", "--count", f"{upstream_branch}..HEAD"
             )
             if rc != 0 or commits_count == "":
                 info["status"] = "error"
@@ -715,9 +729,7 @@ class GitInfo:
             info["commits_count"] = 0
             info["local_commits_count"] = 0
 
-        _, tag, _ = GitInfo._git(
-            repo_dir, "describe", "--long", "--tags", "--always"
-        )
+        _, tag, _ = git("describe", "--long", "--tags", "--always")
         info["tag"] = tag
 
         return info
