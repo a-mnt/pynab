@@ -9,174 +9,139 @@
       <div class="nab-kicker">{% trans "Services" %}</div>
       <h1 class="nab-page-title">{% trans "Services" %}</h1>
       <p class="nab-page-intro">
-        {% trans "Tous les services disponibles et leur configuration sont affichés ici." %}
+        {% trans "Touchez un service pour afficher ses réglages." %}
       </p>
     </div>
 
-    <div class="row">
-      <div class="col-12 mb-4">
-        <div class="nab-card">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Vue d’ensemble" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Accédez directement aux réglages de chaque service depuis cette page." %}
-            </p>
-          </div>
+    {% if service_cards %}
+      <div class="nab-acc">
+        {% for service in service_cards %}
+          <section class="nab-acc-item js-acc-item" id="service-{{ service.name }}">
+            <h2 class="nab-acc-heading">
+              <button
+                type="button"
+                class="nab-acc-toggle js-acc-toggle"
+                aria-expanded="false"
+                aria-controls="service-body-{{ service.name }}"
+              >
+                <span class="nab-acc-text">
+                  <span class="nab-acc-title">{{ service.title }}</span>
+                  {% if service.text %}<span class="nab-acc-desc">{{ service.text }}</span>{% endif %}
+                </span>
+                <svg class="nab-acc-chevron" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </h2>
 
-          <div class="nab-service-overview-grid">
-            {% for service in services %}
-              <a class="nab-service-overview-item" href="#service-{{ service }}">
-                <span class="nab-service-overview-dot"></span>
-
-                {% if service == "nabradio" %}
-                  <span class="nab-service-overview-name">{% trans "Radio" %}</span>
-                {% elif service == "nabmastodond" %}
-                  <span class="nab-service-overview-name">{% trans "Notifications" %}</span>
-                {% elif service == "nabclockd" %}
-                  <span class="nab-service-overview-name">{% trans "Agenda" %}</span>
-                {% elif service == "nabtaichid" %}
-                  <span class="nab-service-overview-name">{% trans "Oreilles" %}</span>
-                {% elif service == "nabiftttd" %}
-                  <span class="nab-service-overview-name">{% trans "Automatisations" %}</span>
-                {% elif service == "nabweatherd" %}
-                  <span class="nab-service-overview-name">{% trans "Météo" %}</span>
-                {% elif service == "nabairqualityd" %}
-                  <span class="nab-service-overview-name">{% trans "Qualité de l’air" %}</span>
-                {% elif service == "nab8balld" %}
-                  <span class="nab-service-overview-name">{% trans "Magic 8 Ball" %}</span>
-                {% elif service == "nabsurprised" %}
-                  <span class="nab-service-overview-name">{% trans "Surprises" %}</span>
-                {% elif service == "nabbookd" %}
-                  <span class="nab-service-overview-name">{% trans "Livres audio" %}</span>
-                {% else %}
-                  <span class="nab-service-overview-name">{{ service }}</span>
-                {% endif %}
-              </a>
-            {% empty %}
-              <div class="nab-empty-state">
-                {% trans "Aucun service disponible." %}
-              </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="row">
-      {% for service in services %}
-        <div class="col-12 mb-4">
-          <section
-            id="service-{{ service }}"
-            class="nab-card nab-service-config-card"
-          >
-            <div class="nab-section-head">
-              {% if service == "nabradio" %}
-                <h2 class="nab-section-title">{% trans "Radio" %}</h2>
-                <p class="nab-section-text">{% trans "Gestion des radios web et de leur lecture." %}</p>
-              {% elif service == "nabmastodond" %}
-                <h2 class="nab-section-title">{% trans "Notifications" %}</h2>
-                <p class="nab-section-text">{% trans "Notifications et services connectés." %}</p>
-              {% elif service == "nabclockd" %}
-                <h2 class="nab-section-title">{% trans "Agenda" %}</h2>
-                <p class="nab-section-text">{% trans "Planification et événements." %}</p>
-              {% elif service == "nabtaichid" %}
-                <h2 class="nab-section-title">{% trans "Oreilles" %}</h2>
-                <p class="nab-section-text">{% trans "Mouvements automatiques des oreilles." %}</p>
-              {% elif service == "nabiftttd" %}
-                <h2 class="nab-section-title">{% trans "Automatisations" %}</h2>
-                <p class="nab-section-text">{% trans "Actions et déclencheurs connectés." %}</p>
-              {% elif service == "nabweatherd" %}
-                <h2 class="nab-section-title">{% trans "Météo" %}</h2>
-                <p class="nab-section-text">{% trans "Prévisions et animations météo." %}</p>
-              {% elif service == "nabairqualityd" %}
-                <h2 class="nab-section-title">{% trans "Qualité de l’air" %}</h2>
-                <p class="nab-section-text">{% trans "Informations sur la qualité de l’air." %}</p>
-              {% elif service == "nab8balld" %}
-                <h2 class="nab-section-title">{% trans "Magic 8 Ball" %}</h2>
-                <p class="nab-section-text">{% trans "Réponses aléatoires." %}</p>
-              {% elif service == "nabsurprised" %}
-                <h2 class="nab-section-title">{% trans "Surprises" %}</h2>
-                <p class="nab-section-text">{% trans "Déclenchement de contenus surprise." %}</p>
-              {% elif service == "nabbookd" %}
-                <h2 class="nab-section-title">{% trans "Livres audio" %}</h2>
-                <p class="nab-section-text">{% trans "Lecture et gestion des contenus audio." %}</p>
-              {% else %}
-                <h2 class="nab-section-title">{{ service }}</h2>
-                <p class="nab-section-text">{% trans "Configuration du service." %}</p>
-              {% endif %}
-            </div>
-
-            <div
-              class="settings nab-service-settings-container"
-              data-url="/{{ service }}/settings"
-              data-service="{{ service }}"
-            >
-              <div class="nab-loading-card">
-                <div class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></div>
-                <span>{% trans "Chargement de la configuration…" %}</span>
-              </div>
+            <div class="nab-acc-body js-acc-body" id="service-body-{{ service.name }}" style="display: none;">
+              {# Loaded the first time the service is opened #}
+              <div
+                class="settings nab-service-settings-container"
+                data-url="{{ service.url }}"
+                data-service="{{ service.name }}"
+              ></div>
             </div>
           </section>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="nab-card">
+        <div class="nab-empty-state">
+          {% trans "Aucun service détecté." %}
         </div>
-      {% empty %}
-        <div class="col-12">
-          <div class="nab-card">
-            <div class="nab-empty-state">
-              {% trans "Aucun service détecté." %}
-            </div>
-          </div>
-        </div>
-      {% endfor %}
-    </div>
+      </div>
+    {% endif %}
   </section>
 
   <style>
-    .nab-service-overview-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
+    .nab-acc {
+      border: 1px solid #e5e7eb;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
     }
 
-    .nab-service-overview-item {
+    .nab-acc-item {
+      scroll-margin-top: 84px;
+    }
+
+    .nab-acc-item + .nab-acc-item {
+      border-top: 1px solid #eef2f7;
+    }
+
+    .nab-acc-heading {
+      margin: 0;
+      font-size: inherit;
+    }
+
+    .nab-acc-toggle {
+      width: 100%;
+      min-height: 60px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      min-height: 54px;
-      padding: 14px 16px;
-      border-radius: 16px;
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
+      gap: 12px;
+      padding: 10px 16px;
+      border: 0;
+      background: transparent;
       color: #1f2937;
-      text-decoration: none !important;
-      font-weight: 600;
+      text-align: left;
     }
 
-    .nab-service-overview-item:hover {
+    .nab-acc-toggle:hover,
+    .nab-acc-toggle:focus {
+      background: #f9fafb;
+    }
+
+    .nab-acc-toggle[aria-expanded="true"] {
       background: #eef2ff;
-      border-color: #c7d2fe;
+    }
+
+    .nab-acc-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.25;
+    }
+
+    .nab-acc-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .nab-acc-desc {
+      font-size: 0.85rem;
+      color: #6b7280;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nab-acc-chevron {
+      flex: 0 0 auto;
+      color: #6b7280;
+      transition: transform 0.15s ease;
+    }
+
+    .nab-acc-toggle[aria-expanded="true"] .nab-acc-chevron {
+      transform: rotate(180deg);
       color: #3341b5;
     }
 
-    .nab-service-overview-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      background: #4f7cff;
-      flex: 0 0 auto;
-    }
-
-    .nab-service-overview-name {
-      line-height: 1.2;
-    }
-
-    .nab-service-config-card {
-      scroll-margin-top: 90px;
+    .nab-acc-body {
+      padding: 14px 16px 18px;
     }
 
     .nab-service-settings-container > .card,
     .nab-service-settings-container > .alert,
     .nab-service-settings-container > .nab-loading-card {
       margin-bottom: 0;
+    }
+
+    .nab-service-settings-container .nab-loading-card {
+      min-height: 72px;
+      box-shadow: none;
     }
 
     .nab-service-settings-container .card {
@@ -198,25 +163,99 @@
       min-height: 22px;
     }
 
-    @media (max-width: 575.98px) {
-      .nab-service-overview-grid {
-        grid-template-columns: 1fr;
+    @media (prefers-reduced-motion: reduce) {
+      .nab-acc-chevron {
+        transition: none;
       }
     }
   </style>
 
   <script type="text/javascript">
     $(function() {
-      $("div.settings").each(function(index, element) {
-        var url = $(element).data("url");
+      var STORAGE_KEY = "nabweb.services.open";
+      var loadingHtml =
+        '<div class="nab-loading-card">' +
+        '<div class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></div>' +
+        '<span>{% trans "Chargement de la configuration…" %}</span></div>';
+      var errorHtml =
+        '<div class="alert alert-warning mb-0" role="alert">{% trans "Impossible de charger la configuration de ce service." %}</div>';
 
-        $.get(url, function(data) {
-          $(element).html(data);
+      function remember(name) {
+        try {
+          if (name) {
+            window.sessionStorage.setItem(STORAGE_KEY, name);
+          } else {
+            window.sessionStorage.removeItem(STORAGE_KEY);
+          }
+        } catch (e) {
+          /* storage unavailable: not a problem */
+        }
+      }
+
+      // Settings of a service are fetched the first time it is opened.
+      function load(item) {
+        var container = item.find(".nab-service-settings-container");
+        if (container.data("loaded")) {
+          return;
+        }
+        container.data("loaded", true).html(loadingHtml);
+        $.get(container.data("url"), function(html) {
+          container.html(html);
         }).fail(function() {
-          $(element).html(
-            '<div class="alert alert-warning mb-0" role="alert">{% trans "Impossible de charger la configuration de ce service." %}</div>'
-          );
+          container.data("loaded", false).html(errorHtml);
         });
+      }
+
+      function setOpen(item, open, animate) {
+        var toggle = item.find(".js-acc-toggle");
+        var body = item.find(".js-acc-body");
+        toggle.attr("aria-expanded", open ? "true" : "false");
+        if (open) {
+          load(item);
+        }
+        if (animate) {
+          body[open ? "slideDown" : "slideUp"](150);
+        } else {
+          body.toggle(open);
+        }
+      }
+
+      $(".js-acc-toggle").on("click", function() {
+        var item = $(this).closest(".js-acc-item");
+        var open = $(this).attr("aria-expanded") !== "true";
+        setOpen(item, open, true);
+        remember(open ? item.attr("id") : null);
+      });
+
+      function openByName(name, scroll) {
+        var target = $(".js-acc-item").filter(function() {
+          return this.id === name;
+        });
+        if (target.length) {
+          setOpen(target, true, false);
+          if (scroll && target[0].scrollIntoView) {
+            target[0].scrollIntoView();
+          }
+        }
+      }
+
+      // Open the service given in the address (#service-nabradio), or the
+      // last one opened during this visit.
+      var wanted = window.location.hash.replace("#", "");
+      if (!wanted) {
+        try {
+          wanted = window.sessionStorage.getItem(STORAGE_KEY);
+        } catch (e) {
+          wanted = null;
+        }
+      }
+      if (wanted) {
+        openByName(wanted, false);
+      }
+
+      // Link to a service followed while already on this page.
+      $(window).on("hashchange", function() {
+        openByName(window.location.hash.replace("#", ""), true);
       });
     });
   </script>

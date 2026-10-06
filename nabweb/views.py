@@ -14,7 +14,9 @@ from django.conf import settings
 from django.core.cache import cache
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.urls import Resolver404, resolve
 from django.utils import translation
+from django.utils.translation import gettext_lazy as _
 from django.utils.translation import to_language, to_locale
 from django.views.generic import View
 from nabradio.views import get_radio_status
@@ -25,14 +27,50 @@ from nabd.i18n import Config
 
 
 def _run_command(cmd, cwd=None):
-    proc = subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as err:
+        # Program not installed (e.g. on a development machine).
+        return 127, "", str(err)
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def get_ssh_state():
+    """
+    Return "active", "sshwarn" (active with the default password) or the
+    state reported by systemd ("inactive", "unknown"...).
+    Kept a few seconds in cache: it is shown on the home page.
+    """
+    ssh_state = cache.get("ssh_state")
+    if ssh_state is None:
+        ssh_state = _run_command_stdout(["systemctl", "is-active", "dropbear"])
+        if ssh_state != "active":
+            ssh_state = _run_command_stdout(["systemctl", "is-active", "ssh"])
+        if ssh_state == "active" and os.path.isfile("/run/sshwarn"):
+            ssh_state = "sshwarn"
+        cache.set("ssh_state", ssh_state, 30)
+    return ssh_state
+
+
+# Names shown on the website for each service, instead of technical names.
+SERVICE_LABELS = {
+    "nabradio": (_("Radio"), _("Radios web et lecture.")),
+    "nabmastodond": (_("Notifications"), _("Mastodon et messages.")),
+    "nabclockd": (_("Agenda"), _("Horloge, réveil et coucher.")),
+    "nabtaichid": (_("Oreilles"), _("Tai chi et mouvements d’oreilles.")),
+    "nabiftttd": (_("Automatisations"), _("Actions IFTTT.")),
+    "nabweatherd": (_("Météo"), _("Prévisions et animations.")),
+    "nabairqualityd": (_("Qualité de l’air"), _("Indice et animations.")),
+    "nab8balld": (_("Magic 8 Ball"), _("Réponses aléatoires.")),
+    "nabsurprised": (_("Surprises"), _("Contenus surprise.")),
+    "nabbookd": (_("Livres audio"), _("Histoires interactives.")),
+}
 
 
 def _run_command_stdout(cmd, cwd=None):
@@ -146,7 +184,31 @@ class NabWebView(BaseView):
         context["services"] = BaseView.get_services("home")
         context["radio_status"] = self.get_radio_status_safe()
         context["uptime"] = self.get_uptime()
+        context["rabbit_state"] = self.get_rabbit_state()
+        context["ssh"] = get_ssh_state()
+        context["alerts"] = self.get_alerts()
         return context
+
+    def get_rabbit_state(self):
+        """
+        State reported by nabd ("idle", "asleep", "playing", "interactive",
+        "recording"), or None if nabd does not answer.
+        """
+        gestalt = async_to_sync(self.query_gestalt)()
+        if gestalt["status"] != "ok":
+            return None
+        return gestalt["result"].get("state")
+
+    def get_alerts(self):
+        """
+        Things that need attention. Only uses what the Update page already
+        checked (kept in cache): the home page never runs git itself.
+        """
+        alerts = []
+        info = GitInfo.get_repository_info("pynab", cached=True)
+        if info and info.get("commits_count", 0) > 0:
+            alerts.append("update")
+        return alerts
 
     def get_uptime(self):
         try:
@@ -207,7 +269,21 @@ class NabWebServicesView(BaseView):
 
     def get_context(self):
         context = super().get_context()
-        context["services"] = BaseView.get_services("services")
+        services = BaseView.get_services("services")
+        context["services"] = services
+        cards = []
+        for name in services:
+            url = f"/{name}/settings"
+            try:
+                resolve(url)
+            except Resolver404:
+                # Service without a settings page: nothing to show.
+                continue
+            title, text = SERVICE_LABELS.get(name, (name, ""))
+            cards.append(
+                {"name": name, "title": title, "text": text, "url": url}
+            )
+        context["service_cards"] = cards
         return context
 
 
@@ -475,11 +551,7 @@ class NabWebSytemInfoView(BaseView):
         except FileNotFoundError:
             uptime = 0
 
-        ssh_state = _run_command_stdout(["systemctl", "is-active", "dropbear"])
-        if ssh_state == "inactive":
-            ssh_state = _run_command_stdout(["systemctl", "is-active", "ssh"])
-        if ssh_state == "active" and os.path.isfile("/run/sshwarn"):
-            ssh_state = "sshwarn"
+        ssh_state = get_ssh_state()
 
         return {
             "variant": variant,

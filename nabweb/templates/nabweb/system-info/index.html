@@ -120,14 +120,8 @@
           <div class="nab-status-list">
             <div class="nab-status-item">
               <span class="nab-status-label">{% trans "Logiciel" %}</span>
-              <span class="nab-status-value">{% trans "Consulter la page Upgrade" %}</span>
+              <a class="nab-status-value" style="color: #3341b5; text-decoration: underline;" href="{% url 'nabweb.upgrade' %}">{% trans "Consulter la page Upgrade" %}</a>
             </div>
-          </div>
-
-          <div class="mt-4">
-            <a class="btn btn-primary nab-action-btn" href="/upgrade/">
-              {% trans "Ouvrir la mise à jour" %}
-            </a>
           </div>
         </div>
       </div>
@@ -175,101 +169,13 @@
       </div>
 
       <div class="col-12 col-xl-6 mb-4">
-        <div class="nab-card h-100">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Redémarrage" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Redémarrer proprement le système Linux du Nabaztag." %}
-            </p>
-          </div>
-
-          <div class="nab-alert-list">
-            <div class="nab-alert-item">
-              <span class="nab-alert-badge">{% trans "Action" %}</span>
-              <span class="nab-alert-text">
-                {% trans "Le redémarrage peut prendre quelques instants." %}
-              </span>
-            </div>
-          </div>
-
-          <div class="mt-4">
-            <button
-              type="button"
-              class="btn btn-outline-primary nab-action-btn js-system-action"
-              data-url="{% url 'nabweb.shutdown' mode='reboot' %}"
-              data-loading="{% trans 'Redémarrage en cours…' %}"
-            >
-              {% trans "Redémarrer" %}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 col-xl-6 mb-4">
-        <div class="nab-card h-100">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Arrêt" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Éteindre proprement le système avant de débrancher l’alimentation." %}
-            </p>
-          </div>
-
-          <div class="nab-alert-list">
-            <div class="nab-alert-item">
-              <span class="nab-alert-badge">{% trans "Attention" %}</span>
-              <span class="nab-alert-text">
-                {% trans "Attendez au moins 10 secondes avant de couper l’alimentation." %}
-              </span>
-            </div>
-          </div>
-
-          <div class="mt-4">
-            <button
-              type="button"
-              class="btn btn-outline-secondary nab-action-btn js-system-action"
-              data-url="{% url 'nabweb.shutdown' mode='shutdown' %}"
-              data-loading="{% trans 'Arrêt en cours…' %}"
-            >
-              {% trans "Arrêter" %}
-            </button>
-          </div>
-        </div>
+        {% include "nabweb/_quick_actions.html" %}
       </div>
     </div>
   </section>
 
   <script type="text/javascript">
     $(function() {
-      $(".js-system-action").on("click", function() {
-        var button = $(this);
-        var url = button.data("url");
-        var loadingText = button.data("loading");
-        var originalText = button.text();
-
-        button.prop("disabled", true).text(loadingText);
-
-        $.ajax({
-          url: url,
-          method: "POST",
-          headers: {
-            "X-CSRFToken": "{{ csrf_token }}"
-          },
-          success: function() {
-            $.bootstrapGrowl(loadingText, {
-              type: "info",
-              delay: 4000
-            });
-          },
-          error: function() {
-            $.bootstrapGrowl("{% trans 'Une erreur est survenue.' %}", {
-              type: "danger",
-              delay: 4000
-            });
-            button.prop("disabled", false).text(originalText);
-          }
-        });
-      });
-
       // Log viewer functionality
       $("#log-file-select").on("change", function() {
         var logFile = $(this).val();

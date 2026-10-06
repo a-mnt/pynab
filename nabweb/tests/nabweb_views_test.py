@@ -5,6 +5,7 @@ import threading
 import time
 from unittest import mock
 
+from django.core.cache import cache
 from django.http import JsonResponse
 from django.test import Client, TestCase
 
@@ -73,6 +74,59 @@ class TestView(TestCase):
             self.assertEqual(response.status_code, 200)
             template_names = [t.name for t in response.templates]
             self.assertTrue("nabweb/_base.html" in template_names)
+
+    def test_home_state(self):
+        cache.clear()
+        response = Client().get("/")
+        self.assertEqual(response.status_code, 200)
+        # nabd is not running in this test
+        self.assertIsNone(response.context["rabbit_state"])
+        self.assertContains(response, "Injoignable")
+        self.assertTrue("ssh" in response.context)
+        self.assertEqual(response.context["alerts"], [])
+        self.assertNotContains(response, "Alertes importantes")
+        self.assertContains(response, "js-quick-action")
+
+    def test_home_update_alert(self):
+        cache.set("git/info/pynab", {"status": "ok", "commits_count": 2}, 60)
+        try:
+            response = Client().get("/")
+        finally:
+            cache.clear()
+        self.assertEqual(response.context["alerts"], ["update"])
+        self.assertContains(response, "Alertes importantes")
+
+    def test_home_no_alert_when_up_to_date(self):
+        cache.set("git/info/pynab", {"status": "ok", "commits_count": 0}, 60)
+        try:
+            response = Client().get("/")
+        finally:
+            cache.clear()
+        self.assertEqual(response.context["alerts"], [])
+
+    def test_services_cards(self):
+        response = Client().get("/services/")
+        cards = response.context["service_cards"]
+        names = [card["name"] for card in cards]
+        self.assertTrue("nabradio" in names)
+        # No settings page: not listed, instead of a card that fails to load.
+        self.assertFalse("nabwebhook" in names)
+        for card in cards:
+            self.assertEqual(Client().get(card["url"]).status_code, 200)
+            self.assertNotEqual(str(card["title"]), "")
+
+    def test_system_page_has_quick_actions(self):
+        response = Client().get("/system-info/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js-quick-action")
+        self.assertContains(response, "/system-info/shutdown/reboot")
+        self.assertContains(response, "/system-info/shutdown/shutdown")
+
+    def test_missing_program_does_not_crash(self):
+        returncode, stdout, stderr = views._run_command(
+            ["this-program-does-not-exist"]
+        )
+        self.assertEqual((returncode, stdout), (127, ""))
 
     def test_get_rfid(self):
         c = Client()

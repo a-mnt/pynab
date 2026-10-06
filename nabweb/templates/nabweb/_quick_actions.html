@@ -1,0 +1,145 @@
+{% load i18n %}
+{# Quick actions card, shared by the Home and System pages. Every action asks for confirmation. #}
+<style>
+  .nab-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 12px;
+  }
+
+  .nab-quick-actions .btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+
+<div class="nab-card">
+  <div class="nab-section-head">
+    <h2 class="nab-section-title">{% trans "Actions rapides" %}</h2>
+  </div>
+
+  <div class="nab-quick-actions">
+    <button
+      type="button"
+      class="btn btn-success js-quick-action"
+      data-url="{% url 'nabweb.wakeup' %}"
+      data-title="{% trans 'Réveiller le lapin ?' %}"
+      data-text="{% trans 'Le lapin se réveille et reprend ses services.' %}"
+      data-done="{% trans 'Lapin réveillé' %}"
+      data-reload="1"
+    >
+      {% trans "Réveiller" %}
+    </button>
+
+    <button
+      type="button"
+      class="btn btn-warning js-quick-action"
+      data-url="{% url 'nabweb.sleep' %}"
+      data-title="{% trans 'Endormir le lapin ?' %}"
+      data-text="{% trans 'Le lapin s’endort : plus de son ni de lumière jusqu’à son réveil.' %}"
+      data-done="{% trans 'Lapin endormi' %}"
+      data-reload="1"
+    >
+      {% trans "Endormir" %}
+    </button>
+
+    <button
+      type="button"
+      class="btn btn-outline-primary js-quick-action"
+      data-url="{% url 'nabweb.shutdown' mode='reboot' %}"
+      data-title="{% trans 'Redémarrer le lapin ?' %}"
+      data-text="{% trans 'Le site sera indisponible pendant une à deux minutes.' %}"
+      data-done="{% trans 'Redémarrage en cours…' %}"
+    >
+      {% trans "Redémarrer" %}
+    </button>
+
+    <button
+      type="button"
+      class="btn btn-outline-danger js-quick-action"
+      data-url="{% url 'nabweb.shutdown' mode='shutdown' %}"
+      data-title="{% trans 'Éteindre le lapin ?' %}"
+      data-text="{% trans 'Il faudra le débrancher puis le rebrancher pour le rallumer. Attendez au moins 10 secondes avant de couper l’alimentation.' %}"
+      data-done="{% trans 'Arrêt en cours…' %}"
+    >
+      {% trans "Éteindre" %}
+    </button>
+
+    <a class="btn btn-outline-primary" href="{% url 'nabweb.upgrade' %}">
+      {% trans "Mise à jour" %}
+    </a>
+  </div>
+</div>
+
+<div class="modal fade" id="nab-confirm-modal" tabindex="-1" role="dialog" aria-labelledby="nab-confirm-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content nab-modal">
+      <div class="modal-header">
+        <h5 class="modal-title" id="nab-confirm-title"></h5>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0 js-confirm-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">{% trans "Annuler" %}</button>
+        <button type="button" class="btn btn-primary js-confirm-ok">{% trans "Confirmer" %}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="text/javascript">
+  $(function() {
+    var modal = $("#nab-confirm-modal");
+    var pending = null;
+
+    function notify(message, type) {
+      $.bootstrapGrowl(message, { type: type, delay: 4000 });
+    }
+
+    // 1. The button only opens the confirmation.
+    $(".js-quick-action").on("click", function() {
+      pending = $(this);
+      modal.find(".modal-title").text(pending.data("title"));
+      modal.find(".js-confirm-text").text(pending.data("text"));
+      modal.modal("show");
+    });
+
+    // 2. The action is sent once confirmed.
+    modal.find(".js-confirm-ok").on("click", function() {
+      var button = pending;
+      modal.modal("hide");
+      if (!button) {
+        return;
+      }
+      pending = null;
+      button.prop("disabled", true);
+
+      $.ajax({
+        url: button.data("url"),
+        method: "POST",
+        dataType: "json",
+        headers: { "X-CSRFToken": "{{ csrf_token }}" }
+      })
+        .done(function(data) {
+          if (data.status === "ok") {
+            notify(button.data("done"), "success");
+            if (button.data("reload")) {
+              // Show the new state of the rabbit.
+              setTimeout(function() { window.location.reload(); }, 1200);
+            }
+          } else {
+            notify("{% trans 'Erreur' %} : " + (data.message || data.status), "danger");
+          }
+        })
+        .fail(function() {
+          notify("{% trans 'Le lapin ne répond pas.' %}", "danger");
+        })
+        .always(function() {
+          button.prop("disabled", false);
+        });
+    });
+  });
+</script>

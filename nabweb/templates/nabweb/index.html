@@ -14,282 +14,91 @@
     </div>
 
     <div class="row">
+      {# Only shown when there is something to report #}
+      {% if alerts %}
+        <div class="col-12 mb-4">
+          <div class="nab-card">
+            <div class="nab-section-head">
+              <h2 class="nab-section-title">{% trans "Alertes importantes" %}</h2>
+            </div>
+
+            <div class="nab-alert-list">
+              {% if "update" in alerts %}
+                <div class="nab-alert-item">
+                  <span class="nab-alert-badge">{% trans "Info" %}</span>
+                  <span class="nab-alert-text">
+                    {% trans "Une mise à jour est disponible." %}
+                    <a href="{% url 'nabweb.upgrade' %}">{% trans "Voir la page Mise à jour" %}</a>
+                  </span>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
       <div class="col-12 col-lg-6 mb-4">
         <div class="nab-card h-100">
           <div class="nab-section-head">
             <h2 class="nab-section-title">{% trans "État du Nabaztag" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Vue rapide de l’état général de votre lapin." %}
-            </p>
           </div>
 
           <div class="nab-status-list">
             <div class="nab-status-item">
-              <span class="nab-status-label">{% trans "Connexion" %}</span>
-              <span class="nab-status-value nab-status-ok">{% trans "Connecté" %}</span>
+              <span class="nab-status-label">{% trans "Lapin" %}</span>
+              {% if rabbit_state is None %}
+                <span class="nab-status-value nab-status-warn">{% trans "Injoignable" %}</span>
+              {% elif rabbit_state == "asleep" %}
+                <span class="nab-status-value">{% trans "Endormi" %}</span>
+              {% else %}
+                <span class="nab-status-value nab-status-ok">{% trans "Éveillé" %}</span>
+              {% endif %}
             </div>
 
             <div class="nab-status-item">
-              <span class="nab-status-label">{% trans "Interface web" %}</span>
-              <span class="nab-status-value nab-status-ok">{% trans "Disponible" %}</span>
+              <span class="nab-status-label">{% trans "En cours" %}</span>
+              <span
+                class="nab-status-value js-home-activity"
+                data-radio="{% trans 'Radio' %}"
+                data-other="{% if rabbit_state == 'playing' and not radio_status.is_playing %}{% trans 'Lecture d’un son' %}{% elif rabbit_state == 'interactive' %}{% trans 'Service interactif' %}{% elif rabbit_state == 'recording' %}{% trans 'Écoute' %}{% else %}{% trans 'Aucun service' %}{% endif %}"
+              >{% if radio_status.is_playing %}{% trans "Radio" %} : {{ radio_status.selected_name }}{% elif rabbit_state == "playing" %}{% trans "Lecture d’un son" %}{% elif rabbit_state == "interactive" %}{% trans "Service interactif" %}{% elif rabbit_state == "recording" %}{% trans "Écoute" %}{% else %}{% trans "Aucun service" %}{% endif %}</span>
+            </div>
+
+            <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "SSH" %}</span>
+              {% if ssh == "sshwarn" %}
+                <span class="nab-status-value nab-status-warn">{% trans "Actif, mot de passe par défaut" %}</span>
+              {% elif ssh == "active" %}
+                <span class="nab-status-value">{% trans "Actif" %}</span>
+              {% else %}
+                <span class="nab-status-value">{% trans "Désactivé" %}</span>
+              {% endif %}
             </div>
 
             <div class="nab-status-item">
               <span class="nab-status-label">{% trans "Levé depuis" %}</span>
-              <span class="nab-status-value">{% if uptime %}
-                  {{ uptime|timesince }}
-                {% else %}
-                  {% trans "Inconnu" %}
-                {% endif %}</span>
+              <span class="nab-status-value">{% if uptime %}{{ uptime|timesince }}{% else %}{% trans "Inconnu" %}{% endif %}</span>
             </div>
           </div>
         </div>
       </div>
 
       <div class="col-12 col-lg-6 mb-4">
-        <div class="nab-card h-100">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Services actifs" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Accès rapide aux services principaux." %}
-            </p>
-          </div>
-
-          <div class="nab-service-list">
-            <div class="nab-service-item" id="home-radio-widget">
-              <div class="flex-grow-1">
-                <div class="font-weight-bold">
-                  {% trans "Radio" %} :
-                  <span class="js-home-radio-title">
-                    {% if radio_status.selected_name %}
-                      {{ radio_status.selected_name }}
-                    {% else %}
-                      {% trans "Aucune station" %}
-                    {% endif %}
-                  </span>
-                </div>
-                <div class="mt-2">
-                  {% if radio_status.is_playing %}
-                    <span class="badge badge-success js-home-radio-status">{% trans "En lecture" %}</span>
-                  {% else %}
-                    <span class="badge badge-secondary js-home-radio-status">{% trans "Arrêtée" %}</span>
-                  {% endif %}
-                </div>
-              </div>
-
-              <div class="ml-3">
-                <form class="mb-0">
-                  {% csrf_token %}
-                  <button
-                    type="button"
-                    class="btn btn-outline-primary btn-sm js-home-radio-play {% if radio_status.is_playing %}d-none{% endif %}"
-                  >
-                    {% trans "Lecture" %}
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-outline-danger btn-sm js-home-radio-stop {% if not radio_status.is_playing %}d-none{% endif %}"
-                  >
-                    {% trans "Stop" %}
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            {% for service in services %}
-              {% if service != "nabradio" %}
-                <div class="nab-service-item">
-                  <span class="nab-service-dot"></span>
-                  <span class="nab-service-name">{{ service }}</span>
-                </div>
-              {% endif %}
-            {% empty %}
-              <div class="nab-empty-state">
-                {% trans "Aucun service détecté." %}
-              </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 mb-4">
-        <div class="nab-card">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Actions rapides" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Accès direct aux commandes principales." %}
-            </p>
-          </div>
-
-          <div class="nab-action-grid">
-            <button class="btn btn-success nab-action-btn js-home-wakeup" type="button">
-              {% trans "Réveiller" %}
-            </button>
-
-            <button class="btn btn-warning nab-action-btn js-home-sleep" type="button">
-              {% trans "Endormir" %}
-            </button>
-
-            <a class="btn btn-primary nab-action-btn" href="/services/">
-              {% trans "Démarrer" %}
-            </a>
-
-            <a class="btn btn-outline-secondary nab-action-btn" href="/services/">
-              {% trans "Arrêter" %}
-            </a>
-
-            <a class="btn btn-outline-primary nab-action-btn" href="/system-info/">
-              {% trans "Redémarrer" %}
-            </a>
-
-            <a class="btn btn-outline-primary nab-action-btn" href="/upgrade/">
-              {% trans "Mise à jour" %}
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 mb-4">
-        <div class="nab-card">
-          <div class="nab-section-head">
-            <h2 class="nab-section-title">{% trans "Alertes importantes" %}</h2>
-            <p class="nab-section-text">
-              {% trans "Éléments nécessitant votre attention." %}
-            </p>
-          </div>
-
-          <div class="nab-alert-list">
-            <div class="nab-alert-item">
-              <span class="nab-alert-badge">{% trans "Info" %}</span>
-              <span class="nab-alert-text">
-                {% trans "Consultez la page Système pour les informations détaillées et la page Mise à jour pour les nouvelles versions." %}
-              </span>
-            </div>
-          </div>
-        </div>
+        {% include "nabweb/_quick_actions.html" %}
       </div>
     </div>
   </section>
 
   <script>
+    // "En cours" follows the radio (see nab-player.js) without reloading.
     document.addEventListener('DOMContentLoaded', function() {
-      const wakeupBtn = document.querySelector('.js-home-wakeup');
-      const sleepBtn = document.querySelector('.js-home-sleep');
-
-      function getCsrfToken() {
-        let token = null;
-        if (document.cookie && document.cookie !== '') {
-          const cookies = document.cookie.split(';');
-          for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, 10) === ('csrftoken=')) {
-              token = decodeURIComponent(cookie.substring(10));
-              break;
-            }
-          }
-        }
-        if (!token) {
-          token = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
-        }
-        return token;
-      }
-
-      const csrftoken = getCsrfToken();
-
-      // Radio widget: follows the player bar (nab-player.js)
-      const radioWidget = document.getElementById('home-radio-widget');
-      if (radioWidget) {
-        const radioTitle = radioWidget.querySelector('.js-home-radio-title');
-        const radioStatus = radioWidget.querySelector('.js-home-radio-status');
-        const radioPlay = radioWidget.querySelector('.js-home-radio-play');
-        const radioStop = radioWidget.querySelector('.js-home-radio-stop');
-
-        document.addEventListener('nabradio:status', function(event) {
-          const state = event.detail;
-          if (state.station) {
-            radioTitle.textContent = state.station.name;
-          }
-          radioStatus.textContent = state.is_playing ? '{% trans "En lecture" %}' : '{% trans "Arrêtée" %}';
-          radioStatus.classList.toggle('badge-success', state.is_playing);
-          radioStatus.classList.toggle('badge-secondary', !state.is_playing);
-          radioPlay.classList.toggle('d-none', state.is_playing);
-          radioStop.classList.toggle('d-none', !state.is_playing);
-        });
-
-        [[radioPlay, 'play'], [radioStop, 'stop']].forEach(function(pair) {
-          pair[0].addEventListener('click', function() {
-            if (window.NabPlayer) {
-              window.NabPlayer.send(pair[1]).catch(window.NabPlayer.showError);
-            }
-          });
-        });
-      }
-
-      if (wakeupBtn) {
-        wakeupBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          wakeupBtn.disabled = true;
-          fetch('/wakeup', {
-            method: 'POST',
-            headers: {
-              'X-CSRFToken': csrftoken
-            }
-          })
-            .then(response => {
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-              }
-              return response.json();
-            })
-            .then(data => {
-              if (data.status === 'ok') {
-                $.bootstrapGrowl('{% trans "Lapin réveillé" %}', {type: 'success'});
-              } else {
-                $.bootstrapGrowl('{% trans "Erreur" %}: ' + (data.message || 'Inconnue'), {type: 'danger'});
-              }
-            })
-            .catch((error) => {
-              console.error('Wakeup error:', error);
-              $.bootstrapGrowl('{% trans "Erreur de communication" %}: ' + error.message, {type: 'danger'});
-            })
-            .finally(() => {
-              wakeupBtn.disabled = false;
-            });
-        });
-      }
-
-      if (sleepBtn) {
-        sleepBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          sleepBtn.disabled = true;
-          fetch('/sleep', {
-            method: 'POST',
-            headers: {
-              'X-CSRFToken': csrftoken
-            }
-          })
-            .then(response => {
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-              }
-              return response.json();
-            })
-            .then(data => {
-              if (data.status === 'ok') {
-                $.bootstrapGrowl('{% trans "Lapin endormi" %}', {type: 'success'});
-              } else {
-                $.bootstrapGrowl('{% trans "Erreur" %}: ' + (data.message || 'Inconnue'), {type: 'danger'});
-              }
-            })
-            .catch((error) => {
-              console.error('Sleep error:', error);
-              $.bootstrapGrowl('{% trans "Erreur de communication" %}: ' + error.message, {type: 'danger'});
-            })
-            .finally(() => {
-              sleepBtn.disabled = false;
-            });
-        });
-      }
+      const activity = document.querySelector('.js-home-activity');
+      document.addEventListener('nabradio:status', function(event) {
+        const state = event.detail;
+        activity.textContent = state.is_playing && state.station
+          ? activity.dataset.radio + ' : ' + state.station.name
+          : activity.dataset.other;
+      });
     });
   </script>
 {% endblock %}
