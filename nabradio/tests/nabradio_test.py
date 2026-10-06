@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 
 from asgiref.sync import async_to_sync
 from django.test import TestCase
@@ -34,6 +37,24 @@ def response(status, **slots):
     }
     packet.update(slots)
     return packet
+
+
+class TestNabRadioLaunch(TestCase):
+    def test_module_loads_before_django_is_configured(self):
+        """
+        systemd runs "python -m nabradio.nabradio": the module is imported
+        before NabService.__init__ configures Django, so it must not load
+        the database models at import time.
+        """
+        env = dict(os.environ)
+        env.pop("DJANGO_SETTINGS_MODULE", None)
+        result = subprocess.run(
+            [sys.executable, "-c", "import nabradio.nabradio"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class TestNabRadio(TestCase):

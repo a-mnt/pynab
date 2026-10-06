@@ -9,7 +9,7 @@ from asgiref.sync import sync_to_async
 
 from nabcommon.nabservice import NabService
 
-from . import control, rfid_data
+from . import rfid_data
 
 # A single request id: nabd plays one radio message at a time, and a fixed id
 # lets a restarted daemon cancel a stream left over by the previous one.
@@ -39,6 +39,12 @@ class NabRadio(NabService):
 
     def __init__(self):
         super().__init__()
+        # Imported here and not at the top of the file: control.py loads the
+        # database models, which is only possible once Django is configured,
+        # and that is done by NabService.__init__ just above.
+        from . import control
+
+        self.control = control
         # True from the moment a message is sent to nabd until nabd reports
         # it ended. The message may be playing or still in nabd's queue.
         self.active = False
@@ -90,7 +96,9 @@ class NabRadio(NabService):
         Make nabd play what the database says should be playing.
         Must be called with the lock held.
         """
-        want_playing, stream_url = await sync_to_async(control.get_desired)()
+        want_playing, stream_url = await sync_to_async(
+            self.control.get_desired
+        )()
         if not self.active:
             if want_playing and stream_url:
                 await self._launch(stream_url)
@@ -112,7 +120,7 @@ class NabRadio(NabService):
         record that the radio is stopped.
         """
         async with self._get_lock():
-            await sync_to_async(control.mark_stopped)()
+            await sync_to_async(self.control.mark_stopped)()
             await self._send_packet(
                 {"type": "cancel", "request_id": RADIO_REQUEST_ID}
             )
@@ -159,10 +167,10 @@ class NabRadio(NabService):
                 # stream. Unless another station was asked for meanwhile,
                 # the radio is now stopped.
                 want_playing, stream_url = await sync_to_async(
-                    control.get_desired
+                    self.control.get_desired
                 )()
                 if want_playing and stream_url == ended_url:
-                    await sync_to_async(control.mark_stopped)()
+                    await sync_to_async(self.control.mark_stopped)()
 
             await self._reconcile()
 
@@ -181,7 +189,7 @@ class NabRadio(NabService):
             return
 
         direction = "next" if delta <= EARS_STEPS // 2 else "previous"
-        if await sync_to_async(control.switch_station)(direction):
+        if await sync_to_async(self.control.switch_station)(direction):
             await self.reload_config()
 
     async def process_nabd_packet(self, packet):
@@ -201,7 +209,7 @@ class NabRadio(NabService):
         ):
             stream_url = await rfid_data.read_data_ui(packet["uid"])
             if stream_url and stream_url != RFID_NO_STREAM:
-                await sync_to_async(control.play_stream_url)(stream_url)
+                await sync_to_async(self.control.play_stream_url)(stream_url)
                 await self.reload_config()
             return
 
