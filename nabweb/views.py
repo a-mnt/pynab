@@ -61,6 +61,30 @@ def get_ssh_state():
     return ssh_state
 
 
+EARS_STEPS = 17  # positions in a full turn, see nabd.ears.Ears.STEPS
+
+
+def parse_ears(gestalt):
+    """
+    Extract the state of both ears from a gestalt answer. nabd describes
+    each ear as "broken", "ok (position unknown)" or "ok (position=5)".
+    Return {"left": {"working": bool, "position": int or None}, "right":
+    ...}, or None if nabd did not answer.
+    """
+    if gestalt.get("status") != "ok":
+        return None
+    hardware_info = gestalt["result"].get("hardware", {})
+    ears = {}
+    for side in ("left", "right"):
+        status = str(hardware_info.get(f"{side}_ear_status", ""))
+        match = re.search(r"position=(\d+)", status)
+        ears[side] = {
+            "working": status != "" and "broken" not in status,
+            "position": int(match.group(1)) % EARS_STEPS if match else None,
+        }
+    return ears
+
+
 # Names shown on the website for each service, instead of technical names.
 SERVICE_LABELS = {
     "nabradio": (_("Radio"), _("Radios web et lecture.")),
@@ -187,17 +211,22 @@ class NabWebView(BaseView):
         context["services"] = BaseView.get_services("home")
         context["radio_status"] = self.get_radio_status_safe()
         context["uptime"] = self.get_uptime()
-        context["rabbit_state"] = self.get_rabbit_state()
+        gestalt = async_to_sync(self.query_gestalt)()
+        context["rabbit_state"] = self.get_rabbit_state(gestalt)
+        context["ears"] = parse_ears(gestalt)
+        context["ear_sides"] = [
+            ("left", _("Oreille gauche")),
+            ("right", _("Oreille droite")),
+        ]
         context["ssh"] = get_ssh_state()
         context["alerts"] = self.get_alerts()
         return context
 
-    def get_rabbit_state(self):
+    def get_rabbit_state(self, gestalt):
         """
         State reported by nabd ("idle", "asleep", "playing", "interactive",
         "recording"), or None if nabd does not answer.
         """
-        gestalt = async_to_sync(self.query_gestalt)()
         if gestalt["status"] != "ok":
             return None
         return gestalt["result"].get("state")
@@ -999,6 +1028,95 @@ class NabWebShutdownView(View):
         mode = kwargs.get("mode")
         shutdown_result = async_to_sync(self.os_shutdown)(mode)
         return JsonResponse(shutdown_result)
+
+
+class NabWebEarsView(View):
+    """
+    State of the ears (GET) and moving them (POST), for the home page.
+    """
+
+    MOVE_TIMEOUT = 20.0
+
+    @staticmethod
+    async def _read_state(reader):
+        # nabd tells its state as soon as a service connects.
+        line = await asyncio.wait_for(reader.readline(), 1.0)
+        return json.loads(line.decode("utf8")).get("state")
+
+    @staticmethod
+    async def _status(reader, writer, state):
+        await NabdConnection.send_packet(
+            writer, {"type": "gestalt", "request_id": "gestalt"}
+        )
+        packet = await NabdConnection.wait_for_response(
+            reader, "gestalt", 1.0
+        )
+        return {
+            "status": "ok",
+            "state": state,
+            "ears": parse_ears({"status": "ok", "result": packet}),
+        }
+
+    async def _do_status(self, reader, writer):
+        state = await self._read_state(reader)
+        return await self._status(reader, writer, state)
+
+    async def _do_move(self, reader, writer, positions):
+        # Ears only move when the rabbit is idle: otherwise nabd would keep
+        # the position and apply it later, by surprise.
+        state = await self._read_state(reader)
+        if state != "idle":
+            return {"status": "busy", "state": state}
+        packet = {"type": "ears", "request_id": "ears"}
+        packet.update(positions)
+        await NabdConnection.send_packet(writer, packet)
+        # nabd answers once the ears have reached their position.
+        response = await NabdConnection.wait_for_response(
+            reader, "ears", self.MOVE_TIMEOUT
+        )
+        if response.get("status") != "ok":
+            return {
+                "status": "error",
+                "message": response.get("message", "Erreur"),
+            }
+        return await self._status(reader, writer, state)
+
+    async def _run(self, function, *args):
+        try:
+            return await NabdConnection.transaction(function, *args)
+        except asyncio.TimeoutError:
+            return {
+                "status": "error",
+                "message": "Timeout lors de la communication avec Nabd.",
+            }
+
+    def get(self, request, *args, **kwargs):
+        response = JsonResponse(async_to_sync(self._run)(self._do_status))
+        response["Cache-Control"] = "no-store"
+        return response
+
+    def post(self, request, *args, **kwargs):
+        positions = {}
+        for side in ("left", "right"):
+            if side in request.POST:
+                try:
+                    position = int(request.POST[side])
+                except ValueError:
+                    position = -1
+                if not 0 <= position < EARS_STEPS:
+                    return JsonResponse(
+                        {"status": "error", "message": "Position invalide."},
+                        status=400,
+                    )
+                positions[side] = position
+        if not positions:
+            return JsonResponse(
+                {"status": "error", "message": "Aucune position donnée."},
+                status=400,
+            )
+        return JsonResponse(
+            async_to_sync(self._run)(self._do_move, positions)
+        )
 
 
 CLOCK_PIDFILE = "/run/nabclockd.pid"

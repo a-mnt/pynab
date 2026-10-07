@@ -8,6 +8,7 @@ from django.urls import URLPattern, URLResolver, include, path
 from django.views.generic import TemplateView
 
 from .views import (
+    NabWebEarsView,
     NabWebHardwareTestView,
     NabWebLogViewerView,
     NabWebRfidReadView,
@@ -74,6 +75,7 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
         NabWebSleepView.as_view(),
         name="nabweb.sleep",
     ),
+    path("ears", NabWebEarsView.as_view(), name="nabweb.ears"),
 
     # --- Upgrade ---
     path("upgrade/", NabWebUpgradeView.as_view(), name="nabweb.upgrade"),

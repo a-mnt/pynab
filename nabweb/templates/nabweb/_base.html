@@ -7,6 +7,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover">
     <meta name="theme-color" content="#5b5bd6">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Nabaztag">
+    <link rel="apple-touch-icon" href="{% static 'nabweb/icons/apple-touch-icon.png' %}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'nabweb/icons/icon-192.png' %}">
+    <link rel="manifest" href="{% static 'nabweb/manifest.json' %}">
     <link rel="shortcut icon" href="{% static 'nabweb/favicon/favicon.ico' %}"/>
 
     <link rel="stylesheet" href="{% static 'nabweb/css/bootstrap.min.css' %}">
@@ -31,7 +35,7 @@
       <div class="container-fluid nab-container">
         <div class="nab-header-row">
           <a class="nab-brand" href="/">
-            <span class="nab-brand-badge">N</span>
+            <img class="nab-brand-badge" src="{% static 'nabweb/icons/logo.png' %}" alt="" style="background: #fff; border: 1px solid #e5e7eb; box-shadow: none; object-fit: cover;">
             <span class="nab-brand-stack">
               <span class="nab-brand-title">{% trans "Nabaztag" %}</span>
               <span class="nab-brand-subtitle">{% trans "Configuration" %}</span>

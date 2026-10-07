@@ -65,6 +65,21 @@
             </div>
 
             <div class="nab-status-item">
+              <span class="nab-status-label">{% trans "Oreilles" %}</span>
+              {% if not ears %}
+                <span class="nab-status-value nab-status-warn">{% trans "Inconnu" %}</span>
+              {% elif ears.left.working and ears.right.working %}
+                <span class="nab-status-value nab-status-ok">{% trans "Fonctionnelles" %}</span>
+              {% elif ears.left.working %}
+                <span class="nab-status-value nab-status-warn">{% trans "Oreille droite en panne" %}</span>
+              {% elif ears.right.working %}
+                <span class="nab-status-value nab-status-warn">{% trans "Oreille gauche en panne" %}</span>
+              {% else %}
+                <span class="nab-status-value nab-status-warn">{% trans "Les deux en panne" %}</span>
+              {% endif %}
+            </div>
+
+            <div class="nab-status-item">
               <span class="nab-status-label">{% trans "SSH" %}</span>
               {% if ssh == "sshwarn" %}
                 <span class="nab-status-value nab-status-warn">{% trans "Actif, mot de passe par défaut" %}</span>
@@ -85,6 +100,10 @@
 
       <div class="col-12 col-lg-6 mb-4">
         {% include "nabweb/_quick_actions.html" %}
+      </div>
+
+      <div class="col-12 col-lg-6 mb-4">
+        {% include "nabweb/_ears.html" %}
       </div>
     </div>
   </section>

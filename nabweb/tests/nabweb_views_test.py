@@ -258,6 +258,53 @@ class TestUpgradeProgress(TestCase):
         self.assertEqual(response.content.decode().count("data-step="), 15)
 
 
+class TestEars(TestCase):
+    def gestalt(self, left, right):
+        return {
+            "status": "ok",
+            "result": {
+                "hardware": {
+                    "left_ear_status": left,
+                    "right_ear_status": right,
+                }
+            },
+        }
+
+    def test_parse_ears(self):
+        ears = views.parse_ears(
+            self.gestalt("ok (position=5)", "ok (position unknown)")
+        )
+        self.assertEqual(ears["left"], {"working": True, "position": 5})
+        self.assertEqual(ears["right"], {"working": True, "position": None})
+
+    def test_parse_broken_and_virtual_ears(self):
+        ears = views.parse_ears(self.gestalt("broken", "virtual (position=16)"))
+        self.assertEqual(ears["left"], {"working": False, "position": None})
+        self.assertEqual(ears["right"], {"working": True, "position": 16})
+
+    def test_parse_ears_without_nabd(self):
+        self.assertIsNone(
+            views.parse_ears({"status": "error", "message": "no nabd"})
+        )
+
+    def test_home_shows_ears(self):
+        response = Client().get("/")
+        # nabd is not running in this test: state unknown, not "broken".
+        self.assertIsNone(response.context["ears"])
+        self.assertContains(response, "js-ears")
+        self.assertNotContains(response, "en panne")
+
+    def test_ears_status_without_nabd(self):
+        response = Client().get("/ears")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "error")
+
+    def test_move_rejects_invalid_positions(self):
+        for data in ({}, {"left": "17"}, {"right": "-1"}, {"left": "abc"}):
+            response = Client().post("/ears", data)
+            self.assertEqual(response.status_code, 400, data)
+
+
 class TestSleepOverride(TestCase):
     def test_override_is_saved_for_nabclockd(self):
         """
