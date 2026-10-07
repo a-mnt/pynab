@@ -1,117 +1,116 @@
-{% load i18n %}
-{# Ears tile of the home page: shows where each ear points and lets the user turn them. #}
+{% load i18n static %}
+{# Ears tile of the home page: the rabbit seen from the front, each ear dragged along its path. #}
 <style>
-  .nab-ears-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .nab-ear {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 12px 8px 14px;
-    border-radius: 16px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-  }
-
-  .nab-ear-name {
-    font-weight: 700;
-    color: #111827;
-  }
-
-  .nab-ear-dial {
+  .nab-ears-stage {
+    display: block;
     width: 100%;
-    max-width: 190px;
+    max-width: 380px;
     height: auto;
-    touch-action: manipulation;
+    margin: 0 auto;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  /* The 17 positions around the dial */
-  .nab-ear-tick {
-    fill: #cbd5e1;
-    pointer-events: none;
+  .nab-ears-floor {
+    stroke: #e5e7eb;
+    stroke-width: 2;
+    stroke-linecap: round;
   }
 
-  .nab-ear-tick.is-current {
-    fill: #3341b5;
-  }
-
-  .nab-ear-hit {
-    fill: transparent;
-    cursor: pointer;
-  }
-
-  .nab-ear.is-disabled .nab-ear-hit {
-    cursor: default;
-    pointer-events: none;
-  }
-
-  .nab-ear-head {
-    fill: #e5e7eb;
-    stroke: #cbd5e1;
+  /* Path followed by the tip of each ear, with its 17 positions */
+  .nab-ears-track {
+    fill: none;
+    stroke: #e5e7eb;
     stroke-width: 1.5;
+    stroke-dasharray: 3 5;
   }
 
-  .nab-ear-eye {
+  .nab-ears-tick {
+    fill: #d5d9e3;
+  }
+
+  .nab-ears-tick.is-zero {
     fill: #6b7280;
   }
 
-  .nab-ear-shape {
-    fill: #fff;
-    stroke: #3341b5;
-    stroke-width: 2.5;
-    stroke-linejoin: round;
-  }
-
-  .nab-ear-pivot {
+  .nab-ears-tick.is-current {
     fill: #3341b5;
   }
 
-  .nab-ear-arm {
-    transform-origin: 60px 60px;
-    transition: transform 0.4s ease-in-out;
+  .nab-ears-body {
+    fill: #fff;
+    stroke: #b9c1d3;
+    stroke-width: 4;
+    stroke-linejoin: round;
   }
 
-  .nab-ear.is-broken .nab-ear-shape {
-    stroke: #9ca3af;
-    stroke-dasharray: 4 4;
+  .nab-ears-body-fill {
+    fill: #fff;
   }
 
-  .nab-ear.is-broken .nab-ear-pivot {
-    fill: #9ca3af;
+  .nab-ears-face {
+    mix-blend-mode: multiply;
+    pointer-events: none;
   }
 
-  .nab-ear-front {
-    fill: #9ca3af;
-    font-size: 8px;
-    font-weight: 600;
+  .nab-ears-edge {
+    stroke: #b9c1d3;
+    stroke-linecap: round;
   }
 
-  .nab-ear-value {
-    min-height: 1.4em;
-    font-size: 0.88rem;
-    color: #6b7280;
-    text-align: center;
+  .nab-ears-fill {
+    stroke: #fff;
+    stroke-linecap: round;
   }
 
-  .nab-ear.is-broken .nab-ear-value {
-    color: #b45309;
-    font-weight: 600;
+  .nab-ears-fill.is-broken {
+    stroke: #e5e7eb;
   }
 
-  .nab-ear .btn {
-    min-height: 40px;
-    margin-top: 8px;
+  /* Position aimed at while dragging and while the ear turns */
+  .nab-ears-ghost {
+    stroke: #3341b5;
+    stroke-opacity: 0.22;
+    stroke-linecap: round;
+    pointer-events: none;
+  }
+
+  /* Invisible, finger-sized grips: the page still scrolls everywhere else */
+  .nab-ears-grip {
+    stroke: transparent;
+    fill: transparent;
+    stroke-linecap: round;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .js-ears.is-locked .nab-ears-grip {
+    cursor: default;
+  }
+
+  .nab-ears-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    margin: 4px 0 0;
+    font-size: 0.95rem;
+    color: #1f2937;
+    cursor: pointer;
+  }
+
+  .nab-ears-link input {
+    width: 20px;
+    height: 20px;
+    accent-color: #3341b5;
   }
 
   .nab-ears-presets {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    margin-top: 12px;
+    margin-top: 4px;
   }
 
   .nab-ears-note {
@@ -125,61 +124,34 @@
     color: #b45309;
     font-weight: 600;
   }
-
-  @media (prefers-reduced-motion: reduce) {
-    .nab-ear-arm {
-      transition: none !important;
-    }
-  }
 </style>
 
 <div
   class="nab-card js-ears"
   data-url="{% url 'nabweb.ears' %}"
   data-csrf="{{ csrf_token }}"
+  data-face="{% static 'nabweb/icons/icon-192.png' %}"
   data-state="{{ rabbit_state|default:'' }}"
   data-left="{% if ears.left.position is not None %}{{ ears.left.position }}{% endif %}"
   data-right="{% if ears.right.position is not None %}{{ ears.right.position }}{% endif %}"
   data-left-working="{{ ears.left.working|yesno:'1,0' }}"
   data-right-working="{{ ears.right.working|yesno:'1,0' }}"
-  data-text-position="{% trans 'Position' %}"
-  data-text-unknown="{% trans 'Position inconnue' %}"
-  data-text-broken="{% trans 'En panne' %}"
   data-text-moving="{% trans 'Les oreilles tournent…' %}"
   data-text-asleep="{% trans 'Le lapin dort : réveillez-le pour bouger ses oreilles.' %}"
   data-text-busy="{% trans 'Le lapin est occupé : les oreilles se commandent quand il est au repos.' %}"
   data-text-unreachable="{% trans 'Le lapin ne répond pas.' %}"
-  data-text-help="{% trans 'Touchez un point du cadran pour y amener l’oreille. Elle tourne toujours vers l’avant.' %}"
+  data-text-help="{% trans 'Faites glisser une oreille le long de sa trajectoire, puis relâchez.' %}"
 >
   <div class="nab-section-head">
     <h2 class="nab-section-title">{% trans "Oreilles" %}</h2>
   </div>
 
-  <div class="nab-ears-grid">
-    {% for side, name in ear_sides %}
-      <div class="nab-ear js-ear" data-side="{{ side }}">
-        <span class="nab-ear-name">{{ name }}</span>
+  <svg class="nab-ears-stage js-ears-stage" viewBox="0 40 320 212" role="img" aria-label="{% trans 'Position des oreilles du lapin' %}"></svg>
 
-        {# Side view of the rabbit, facing right. Position 0 is the ear straight up; it turns clockwise, towards the front. #}
-        <svg class="nab-ear-dial" viewBox="0 0 120 120" role="img" aria-label="{{ name }}">
-          <g class="js-ear-ticks"></g>
-          <path class="nab-ear-head" d="M40 118 V82 a20 20 0 0 1 40 0 V118 Z"/>
-          <circle class="nab-ear-eye" cx="70" cy="82" r="2.2"/>
-          <text class="nab-ear-front" x="84" y="100">{% trans "avant" %} →</text>
-          <g class="nab-ear-arm js-ear-arm">
-            <path class="nab-ear-shape" d="M60 64 C52 54 52 26 60 16 C68 26 68 54 60 64 Z"/>
-          </g>
-          <circle class="nab-ear-pivot" cx="60" cy="60" r="4"/>
-        </svg>
-
-        <span class="nab-ear-value js-ear-value" aria-live="polite"></span>
-
-        <button type="button" class="btn btn-outline-primary btn-sm js-ear-step">
-          {% trans "Avancer d’un cran" %}
-        </button>
-      </div>
-    {% endfor %}
-  </div>
+  <label class="nab-ears-link">
+    <input type="checkbox" class="js-ears-linked">
+    {% trans "Bouger les deux oreilles ensemble" %}
+  </label>
 
   <div class="nab-ears-presets">
     <button type="button" class="btn btn-outline-primary js-ears-preset" data-left="0" data-right="0">
@@ -197,134 +169,221 @@
   document.addEventListener('DOMContentLoaded', function() {
     var STEPS = 17;            // positions in a full turn
     var STEP_MS = 170;         // on-screen time per position, close to the motor
+    var DOWN = 10;             // position drawn flat, level with the ground
+    var LENGTH = 70;           // length of an ear, in drawing units
+    var FLAT = 0.32;           // width of the oval, relative to its length
+    var BODY = 'M102 244 L119 150 A41.5 41.5 0 0 1 201 150 L218 244 Z';
+    var SVG_NS = 'http://www.w3.org/2000/svg';
+
     var card = document.querySelector('.js-ears');
     if (!card) {
       return;
     }
+    var svg = card.querySelector('.js-ears-stage');
     var note = card.querySelector('.js-ears-note');
-    var svgNS = 'http://www.w3.org/2000/svg';
+    var linked = card.querySelector('.js-ears-linked');
+    var presets = card.querySelectorAll('.js-ears-preset');
     var state = card.dataset.state || null;
     var moving = false;
-    var ears = {};
+    var frame = null;
+    var lastTime = null;
+    var dragging = null;
+
+    // Where each ear is attached. "out" is the side it lies down on.
+    // The rabbit is drawn with its left ear on the left of the screen:
+    // swap the two entries if your rabbit does the opposite.
+    var ears = {
+      left: { x: 136, y: 128, out: -1 },
+      right: { x: 184, y: 128, out: 1 }
+    };
+    var SIDES = ['left', 'right'];
 
     function text(name) {
       return card.getAttribute('data-text-' + name);
     }
 
-    Array.prototype.forEach.call(card.querySelectorAll('.js-ear'), function(element) {
-      var side = element.dataset.side;
+    function el(tag, attributes, parent) {
+      var element = document.createElementNS(SVG_NS, tag);
+      for (var key in attributes) {
+        element.setAttribute(key, attributes[key]);
+      }
+      parent.appendChild(element);
+      return element;
+    }
+
+    // Slanted oval through the tip of the raised ear (position 0, straight
+    // up) and the tip of the lowered ear (position DOWN, flat, outwards).
+    function fit(ear, flat) {
+      var turn = (DOWN / STEPS) * 2 * Math.PI;
+      var dx = -ear.out * LENGTH;
+      var dy = -LENGTH;
+      var re = 1 - Math.cos(turn);
+      var im = -Math.sin(turn) * flat;
+      var norm = re * re + im * im;
+      var px = (dx * re + dy * im) / norm;
+      var py = (dy * re - dx * im) / norm;
+      var sign = flat < 0 ? -1 : 1;
+      ear.ox = ear.x - px;
+      ear.oy = ear.y - LENGTH - py;
+      ear.a = Math.hypot(px, py);
+      ear.b = ear.a * FLAT;
+      ear.ux = px / ear.a;
+      ear.uy = py / ear.a;
+      ear.vx = -ear.uy * sign;
+      ear.vy = ear.ux * sign;
+      // Positive when the ear goes down on the side of its attachment.
+      return (ear.x - ear.ox) * ear.vx + (ear.y - ear.oy) * ear.vy;
+    }
+
+    function tip(ear, position) {
+      var angle = (position / STEPS) * 2 * Math.PI;
+      var c = ear.a * Math.cos(angle);
+      var s = ear.b * Math.sin(angle);
+      return [ear.ox + c * ear.ux + s * ear.vx, ear.oy + c * ear.uy + s * ear.vy];
+    }
+
+    // Position of the oval closest to a point of the drawing.
+    function positionAt(ear, point) {
+      var dx = point.x - ear.ox;
+      var dy = point.y - ear.oy;
+      var turn = Math.atan2((dx * ear.vx + dy * ear.vy) / ear.b, (dx * ear.ux + dy * ear.uy) / ear.a) / (2 * Math.PI);
+      if (turn < 0) {
+        turn += 1;
+      }
+      return Math.round(turn * STEPS) % STEPS;
+    }
+
+    /* ---------- Drawing ---------- */
+    el('line', { x1: 60, y1: 244, x2: 260, y2: 244, 'class': 'nab-ears-floor' }, svg);
+    SIDES.forEach(function(side) {
+      var ear = ears[side];
       var raw = card.getAttribute('data-' + side);
-      var ear = ears[side] = {
-        element: element,
-        arm: element.querySelector('.js-ear-arm'),
-        value: element.querySelector('.js-ear-value'),
-        step: element.querySelector('.js-ear-step'),
-        // Unreachable rabbit: nothing is known, which is not "broken".
-        working: !state || card.getAttribute('data-' + side + '-working') === '1',
-        position: raw === '' ? null : parseInt(raw, 10),
-        turns: 0,              // positions travelled, never decreases: the ear only turns forward
-        ticks: []
-      };
-
-      // The 17 positions: a visible dot and a larger invisible touch target.
-      var group = element.querySelector('.js-ear-ticks');
+      if (fit(ear, FLAT) < 0) {
+        fit(ear, -FLAT);
+      }
+      // Unreachable rabbit: nothing is known, which is not "broken".
+      ear.working = !state || card.getAttribute('data-' + side + '-working') === '1';
+      ear.position = raw === '' ? null : parseInt(raw, 10);
+      ear.current = ear.position || 0;   // drawn position, may be between two steps
+      ear.target = ear.current;
+      ear.ghost = null;
+      ear.ticks = [];
+      el('ellipse', {
+        cx: ear.ox, cy: ear.oy, rx: ear.a, ry: ear.b,
+        transform: 'rotate(' + (Math.atan2(ear.uy, ear.ux) * 180 / Math.PI) + ' ' + ear.ox + ' ' + ear.oy + ')',
+        'class': 'nab-ears-track'
+      }, svg);
       for (var i = 0; i < STEPS; i++) {
-        var angle = (i * 2 * Math.PI) / STEPS;
-        var x = 60 + 52 * Math.sin(angle);
-        var y = 60 - 52 * Math.cos(angle);
-        var dot = document.createElementNS(svgNS, 'circle');
-        dot.setAttribute('class', 'nab-ear-tick');
-        dot.setAttribute('cx', x);
-        dot.setAttribute('cy', y);
-        dot.setAttribute('r', i === 0 ? 4 : 3);
-        group.appendChild(dot);
-        ear.ticks.push(dot);
+        var point = tip(ear, i);
+        ear.ticks.push(el('circle', {
+          cx: point[0], cy: point[1], r: i ? 3 : 4.6,
+          'class': 'nab-ears-tick' + (i ? '' : ' is-zero')
+        }, svg));
       }
-      // Touch targets come last so that they sit above every dot.
-      for (i = 0; i < STEPS; i++) {
-        angle = (i * 2 * Math.PI) / STEPS;
-        x = 60 + 52 * Math.sin(angle);
-        y = 60 - 52 * Math.cos(angle);
-        var hit = document.createElementNS(svgNS, 'circle');
-        hit.setAttribute('class', 'nab-ear-hit');
-        hit.setAttribute('cx', x);
-        hit.setAttribute('cy', y);
-        hit.setAttribute('r', 9.5);
-        hit.setAttribute('data-position', i);
-        group.appendChild(hit);
-      }
-      ear.turns = ear.position || 0;
-      draw(ear, 0);
-
-      group.addEventListener('click', function(event) {
-        var position = event.target.getAttribute('data-position');
-        if (position !== null) {
-          var target = {};
-          target[side] = parseInt(position, 10);
-          move(target);
-        }
+    });
+    // Outlines first, fills next: the base of the ears blends into the body.
+    var edges = el('g', {}, svg);
+    el('path', { d: BODY, 'class': 'nab-ears-body' }, svg);
+    var fills = el('g', {}, svg);
+    el('path', { d: BODY, 'class': 'nab-ears-body-fill' }, svg);
+    // The face is the logo of the site.
+    el('image', { href: card.dataset.face, x: 122.3, y: 137.1, width: 75.7, height: 75.7, 'class': 'nab-ears-face' }, svg);
+    SIDES.forEach(function(side) {
+      var ear = ears[side];
+      ear.ghostLine = el('line', { x1: ear.x, y1: ear.y, 'stroke-width': 24, 'class': 'nab-ears-ghost', visibility: 'hidden' }, svg);
+      ear.edge = el('line', { x1: ear.x, y1: ear.y, 'stroke-width': 24, 'class': 'nab-ears-edge' }, edges);
+      ear.fill = el('line', { x1: ear.x, y1: ear.y, 'stroke-width': 20, 'class': 'nab-ears-fill' }, fills);
+    });
+    // Grips come last so that they sit above everything.
+    SIDES.forEach(function(side) {
+      var ear = ears[side];
+      ear.ticks.forEach(function(dot) {
+        el('circle', { cx: dot.getAttribute('cx'), cy: dot.getAttribute('cy'), r: 11, 'class': 'nab-ears-grip', 'data-side': side }, svg);
       });
-      ear.step.addEventListener('click', function() {
-        var target = {};
-        target[side] = ((ear.position || 0) + 1) % STEPS;
-        move(target);
-      });
+      ear.grip = el('line', { x1: ear.x, y1: ear.y, 'stroke-width': 44, 'class': 'nab-ears-grip', 'data-side': side }, svg);
     });
 
-    Array.prototype.forEach.call(card.querySelectorAll('.js-ears-preset'), function(button) {
-      button.addEventListener('click', function() {
-        move({
-          left: parseInt(button.dataset.left, 10),
-          right: parseInt(button.dataset.right, 10)
+    function draw() {
+      SIDES.forEach(function(side) {
+        var ear = ears[side];
+        var point = tip(ear, ear.current);
+        [ear.edge, ear.fill, ear.grip].forEach(function(line) {
+          line.setAttribute('x2', point[0]);
+          line.setAttribute('y2', point[1]);
+        });
+        ear.fill.classList.toggle('is-broken', !ear.working);
+        var aim = ear.ghost !== null ? ear.ghost : (ear.current !== ear.target ? ear.target : null);
+        ear.ghostLine.setAttribute('visibility', aim === null ? 'hidden' : 'visible');
+        if (aim !== null) {
+          var aimed = tip(ear, aim);
+          ear.ghostLine.setAttribute('x2', aimed[0]);
+          ear.ghostLine.setAttribute('y2', aimed[1]);
+        }
+        var lit = aim !== null ? aim : (ear.working && ear.position !== null ? ear.position : -1);
+        ear.ticks.forEach(function(dot, index) {
+          dot.classList.toggle('is-current', index === lit);
         });
       });
-    });
+    }
 
-    // Rotate the drawing to the ear's position, over `duration` ms.
-    function draw(ear, duration) {
-      ear.arm.style.transitionDuration = duration + 'ms';
-      ear.arm.style.transform = 'rotate(' + (ear.turns * 360) / STEPS + 'deg)';
-      ear.ticks.forEach(function(dot, index) {
-        dot.classList.toggle('is-current', ear.working && index === ear.position);
+    // The drawn ears turn like the real ones: always forward, one position
+    // every STEP_MS.
+    function animate(now) {
+      var step = lastTime === null ? 0 : Math.min(now - lastTime, 100) / STEP_MS;
+      var running = false;
+      lastTime = now;
+      SIDES.forEach(function(side) {
+        var ear = ears[side];
+        if (ear.current === ear.target) {
+          return;
+        }
+        var remaining = ((ear.target - ear.current) % STEPS + STEPS) % STEPS;
+        if (step >= remaining) {
+          ear.current = ear.target;
+        } else {
+          ear.current = (ear.current + step) % STEPS;
+          running = true;
+        }
       });
-      ear.element.classList.toggle('is-broken', !ear.working);
-      if (!ear.working) {
-        ear.value.textContent = text('broken');
-      } else if (ear.position === null) {
-        ear.value.textContent = text('unknown');
+      draw();
+      if (running) {
+        frame = requestAnimationFrame(animate);
       } else {
-        ear.value.textContent = text('position') + ' ' + ear.position + ' / ' + (STEPS - 1);
+        frame = null;
+        lastTime = null;
       }
     }
 
-    // Show `position` for an ear, turning forward from where it is drawn.
-    function show(ear, position, animate) {
-      if (position === null || position === undefined) {
-        ear.position = null;
-        draw(ear, 0);
+    // Show `position` for an ear. Returns how long the turn takes on screen.
+    function show(ear, position, animated) {
+      ear.position = (position === null || position === undefined) ? null : position;
+      var target = ear.position || 0;
+      var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!animated || reduced) {
+        ear.current = ear.target = target;
+        draw();
         return 0;
       }
-      var drawn = ((ear.turns % STEPS) + STEPS) % STEPS;
-      var delta = (position - drawn + STEPS) % STEPS;
-      ear.turns += delta;
-      ear.position = position;
-      var duration = animate ? Math.max(400, delta * STEP_MS) : 0;
-      draw(ear, delta === 0 ? 0 : duration);
-      return delta === 0 ? 0 : duration;
+      ear.target = target;
+      var delta = ((target - ear.current) % STEPS + STEPS) % STEPS;
+      if (delta && frame === null) {
+        frame = requestAnimationFrame(animate);
+      }
+      draw();
+      return delta * STEP_MS;
+    }
+
+    function usable() {
+      return state === 'idle' && !moving;
     }
 
     function refreshControls() {
-      var usable = state === 'idle' && !moving;
-      ['left', 'right'].forEach(function(side) {
-        var ear = ears[side];
-        var enabled = usable && ear.working;
-        ear.step.disabled = !enabled;
-        ear.element.classList.toggle('is-disabled', !enabled);
-      });
       var anyWorking = ears.left.working || ears.right.working;
-      Array.prototype.forEach.call(card.querySelectorAll('.js-ears-preset'), function(button) {
-        button.disabled = !(usable && anyWorking);
+      card.classList.toggle('is-locked', !usable());
+      Array.prototype.forEach.call(presets, function(button) {
+        button.disabled = !(usable() && anyWorking);
       });
+      linked.disabled = !(ears.left.working && ears.right.working);
 
       note.classList.remove('is-warning');
       if (moving) {
@@ -338,26 +397,26 @@
     }
 
     // Apply what the rabbit reports.
-    function apply(data, animate) {
+    function apply(data, animated) {
       if (data.state !== undefined) {
         state = data.state;
       }
       if (data.ears) {
-        ['left', 'right'].forEach(function(side) {
+        SIDES.forEach(function(side) {
           ears[side].working = data.ears[side].working;
-          show(ears[side], data.ears[side].position, animate);
+          show(ears[side], data.ears[side].position, animated);
         });
       }
     }
 
     function refresh() {
-      if (moving) {
+      if (moving || dragging) {
         return;
       }
       fetch(card.dataset.url, { credentials: 'same-origin', cache: 'no-store' })
         .then(function(response) { return response.json(); })
         .then(function(data) {
-          if (moving) {
+          if (moving || dragging) {
             return;
           }
           if (data.status === 'ok') {
@@ -371,13 +430,13 @@
     }
 
     function move(target) {
-      if (moving || state !== 'idle') {
+      if (!usable()) {
         return;
       }
       // Broken ears are left alone.
       var body = new URLSearchParams();
       var longest = 0;
-      ['left', 'right'].forEach(function(side) {
+      SIDES.forEach(function(side) {
         if (target[side] !== undefined && ears[side].working) {
           body.append(side, target[side]);
           // The drawing starts turning at once, like the real ear.
@@ -420,6 +479,85 @@
         });
     }
 
+    /* ---------- Dragging an ear, with a finger or the mouse ---------- */
+    function sideOf(event) {
+      var side = event.target.getAttribute && event.target.getAttribute('data-side');
+      return side && usable() && ears[side].working ? side : null;
+    }
+
+    function aim(event) {
+      var point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      point = point.matrixTransform(svg.getScreenCTM().inverse());
+      var position = positionAt(ears[dragging], point);
+      SIDES.forEach(function(side) {
+        var follows = side === dragging || (linked.checked && ears[side].working);
+        ears[side].ghost = follows ? position : null;
+      });
+      draw();
+    }
+
+    function release(commit) {
+      if (!dragging) {
+        return;
+      }
+      var target = {};
+      SIDES.forEach(function(side) {
+        var ear = ears[side];
+        // Releasing where the ear already is sends nothing.
+        if (commit && ear.ghost !== null && ear.ghost !== ear.position) {
+          target[side] = ear.ghost;
+        }
+        ear.ghost = null;
+      });
+      dragging = null;
+      draw();
+      move(target);
+    }
+
+    svg.addEventListener('pointerdown', function(event) {
+      var side = sideOf(event);
+      if (!side || dragging) {
+        return;
+      }
+      event.preventDefault();
+      dragging = side;
+      if (svg.setPointerCapture) {
+        svg.setPointerCapture(event.pointerId);
+      }
+      aim(event);
+    });
+    svg.addEventListener('pointermove', function(event) {
+      if (dragging) {
+        aim(event);
+      }
+    });
+    svg.addEventListener('pointerup', function() { release(true); });
+    svg.addEventListener('pointercancel', function() { release(false); });
+    // Browsers that ignore touch-action inside a drawing: holding an ear
+    // must not scroll the page.
+    svg.addEventListener('touchstart', function(event) {
+      if (sideOf(event)) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+    svg.addEventListener('touchmove', function(event) {
+      if (dragging) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+
+    Array.prototype.forEach.call(presets, function(button) {
+      button.addEventListener('click', function() {
+        move({
+          left: parseInt(button.dataset.left, 10),
+          right: parseInt(button.dataset.right, 10)
+        });
+      });
+    });
+
+    draw();
     refreshControls();
 
     // The rabbit becomes busy or idle again when the radio starts or stops,
