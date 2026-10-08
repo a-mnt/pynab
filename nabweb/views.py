@@ -9,6 +9,7 @@ import platform
 import re
 import signal
 import subprocess
+import threading
 import time
 
 from asgiref.sync import async_to_sync, sync_to_async
@@ -27,6 +28,8 @@ from nabradio.views import get_radio_status
 from nabcommon import hardware
 from nabcommon.nabservice import NabService
 from nabd.i18n import Config
+
+from . import sound, wifi
 
 
 def _run_command(cmd, cwd=None):
@@ -345,6 +348,8 @@ class NabWebSettingsView(NabWebView):
         context["locale_saved"] = (
             self.request.method == "POST" and "locale" in self.request.POST
         )
+        context["sound_available"] = sound.available()
+        context["wifi_available"] = wifi.available()
         return context
 
 
@@ -1304,3 +1309,194 @@ class NabWebSleepView(View):
     def post(self, request, *args, **kwargs):
         sleep_result = async_to_sync(self.sleep)()
         return JsonResponse(sleep_result)
+
+
+async def _do_rabbit_model(reader, writer):
+    # nabd tells its state as soon as a service connects.
+    line = await asyncio.wait_for(reader.readline(), 1.0)
+    state = json.loads(line.decode("utf8")).get("state")
+    await NabdConnection.send_packet(
+        writer, {"type": "gestalt", "request_id": "gestalt"}
+    )
+    packet = await NabdConnection.wait_for_response(reader, "gestalt", 1.0)
+    return {
+        "status": "ok",
+        "state": state,
+        "model": packet.get("hardware", {}).get("model"),
+    }
+
+
+def rabbit_model():
+    """Model of the rabbit ("2019_TAG", "2019_TAGTAG"...), kept in cache."""
+    model = cache.get("rabbit_model")
+    if model is None:
+        try:
+            answer = async_to_sync(NabdConnection.transaction)(
+                _do_rabbit_model
+            )
+        except Exception:
+            answer = {"status": "error"}
+        if answer.get("status") != "ok":
+            return None
+        model = answer.get("model") or ""
+        cache.set("rabbit_model", model, 3600)
+    return model
+
+
+class NabWebSoundView(View):
+    """
+    Volume of the rear wheel (Settings page).
+    GET: levels and wheel position. POST: save, or test one level.
+    """
+
+    TEST_SOUND = "nabclockd/signature.mp3"
+    TEST_TIMEOUT = 15.0
+    _test_lock = threading.Lock()
+
+    def _status(self, model):
+        low, high = sound.get_levels(model)
+        default_low, default_high = sound.default_levels(model)
+        return {
+            "status": "ok",
+            "low": low,
+            "high": high,
+            "default_low": default_low,
+            "default_high": default_high,
+            "wheel": sound.wheel_position(model),
+        }
+
+    def get(self, request, *args, **kwargs):
+        if not sound.available():
+            return JsonResponse({"status": "unavailable"})
+        response = JsonResponse(self._status(rabbit_model()))
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @staticmethod
+    def _percent(request, name):
+        try:
+            value = int(request.POST.get(name, ""))
+        except ValueError:
+            return None
+        return value if 0 <= value <= 100 else None
+
+    @staticmethod
+    async def _play(reader, writer, sound_file, timeout):
+        line = await asyncio.wait_for(reader.readline(), 1.0)
+        state = json.loads(line.decode("utf8")).get("state")
+        if state != "idle":
+            # The sound would wait in nabd's queue and play later, by surprise.
+            return {"status": "busy", "state": state}
+        await NabdConnection.send_packet(
+            writer,
+            {
+                "type": "command",
+                "request_id": "volume-test",
+                "sequence": [{"audio": [sound_file]}],
+            },
+        )
+        # nabd answers once the sound has been played.
+        await NabdConnection.wait_for_response(reader, "volume-test", timeout)
+        return {"status": "ok"}
+
+    def _test(self, model, low, high, which):
+        if not self._test_lock.acquire(blocking=False):
+            return {"status": "busy", "state": "test"}
+        current = sound.read_conf()
+        saved = {
+            key: current.get(key, default)
+            for key, default in sound.DEFAULTS.items()
+        }
+        try:
+            # For the test, both positions of the wheel play the tested
+            # level, whatever the wheel is on (except mute).
+            level = low if which == "low" else high
+            sound.set_levels(model, level, level)
+            result = async_to_sync(NabdConnection.transaction)(
+                self._play, self.TEST_SOUND, self.TEST_TIMEOUT
+            )
+        finally:
+            sound.write_conf(saved)
+            sound.reload_mixer()
+            self._test_lock.release()
+        result["wheel"] = sound.wheel_position(model)
+        return result
+
+    def post(self, request, *args, **kwargs):
+        if not sound.available():
+            return JsonResponse({"status": "unavailable"}, status=404)
+        low = self._percent(request, "low")
+        high = self._percent(request, "high")
+        if low is None or high is None:
+            return JsonResponse(
+                {"status": "error", "message": "Valeur invalide."}, status=400
+            )
+        low = min(low, high)
+        model = rabbit_model()
+        action = request.POST.get("action")
+        if action == "save":
+            reloaded = sound.set_levels(model, low, high)
+            result = self._status(model)
+            result["applied"] = reloaded
+            return JsonResponse(result)
+        if action == "test" and request.POST.get("which") in ("low", "high"):
+            return JsonResponse(
+                self._test(model, low, high, request.POST["which"])
+            )
+        return JsonResponse(
+            {"status": "error", "message": "Action inconnue."}, status=400
+        )
+
+
+class NabWebWifiView(View):
+    """
+    Wi-Fi of the rabbit (Settings page).
+    GET: network in use (and nearby networks with ?scan=1).
+    POST action=test: Internet test. POST action=connect: join a network.
+    """
+
+    def get(self, request, *args, **kwargs):
+        if not wifi.available():
+            return JsonResponse({"status": "unavailable"})
+        result = {"status": "ok", "job": wifi.job()}
+        if request.GET.get("scan"):
+            networks = wifi.scan()
+            if networks is None:
+                result["networks"] = []
+                result["scan_failed"] = True
+            else:
+                result["networks"] = networks
+        result["current"] = wifi.status()
+        response = JsonResponse(result)
+        response["Cache-Control"] = "no-store"
+        return response
+
+    def post(self, request, *args, **kwargs):
+        if not wifi.available():
+            return JsonResponse({"status": "unavailable"}, status=404)
+        action = request.POST.get("action")
+        if action == "test":
+            return JsonResponse({"status": "ok", "internet": wifi.internet_test()})
+        if action == "connect":
+            ssid = request.POST.get("ssid", "").strip()
+            password = request.POST.get("password", "")
+            if not ssid or len(ssid.encode("utf8")) > 32:
+                return JsonResponse(
+                    {"status": "error", "reason": "bad-ssid"}, status=400
+                )
+            if password and not 8 <= len(password) <= 63:
+                return JsonResponse(
+                    {"status": "error", "reason": "bad-password"}, status=400
+                )
+            started = wifi.connect(
+                ssid,
+                password,
+                hidden=request.POST.get("hidden") == "1",
+                security=request.POST.get("security", ""),
+            )
+            if not started:
+                return JsonResponse({"status": "busy"})
+            return JsonResponse({"status": "ok", "job": wifi.job()})
+        return JsonResponse(
+            {"status": "error", "message": "Action inconnue."}, status=400
+        )

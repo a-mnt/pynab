@@ -1,0 +1,370 @@
+{% load i18n %}
+{# Volume of the rear wheel: one slider, two points (medium and loud). #}
+<style>
+  .nab-vol-range {
+    position: relative;
+    height: 56px;
+    margin: 30px 22px 26px;
+    touch-action: none;
+    cursor: pointer;
+  }
+
+  .nab-vol-track,
+  .nab-vol-fill {
+    position: absolute;
+    top: 25px;
+    height: 6px;
+    border-radius: 3px;
+  }
+
+  .nab-vol-track {
+    left: 0;
+    right: 0;
+    background: #e5e7eb;
+  }
+
+  .nab-vol-fill {
+    background: #3341b5;
+    opacity: 0.35;
+  }
+
+  .nab-vol-thumb {
+    position: absolute;
+    top: 14px;
+    width: 28px;
+    height: 28px;
+    margin-left: -14px;
+    padding: 0;
+    border: 3px solid #3341b5;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .nab-vol-thumb.is-high {
+    background: #3341b5;
+  }
+
+  .nab-vol-thumb:focus {
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(51, 65, 181, 0.25);
+  }
+
+  .nab-vol-label {
+    position: absolute;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #3341b5;
+    pointer-events: none;
+  }
+
+  .nab-vol-thumb.is-low .nab-vol-label {
+    bottom: auto;
+    top: 32px;
+  }
+
+  .nab-vol-scale {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 4px;
+    font-size: 0.78rem;
+    color: #6b7280;
+  }
+
+  .nab-vol-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .nab-vol-status {
+    min-height: 1.5em;
+    margin: 12px 0 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
+  .nab-vol-status.is-ok {
+    color: #047857;
+    font-weight: 600;
+  }
+
+  .nab-vol-status.is-warning {
+    color: #b45309;
+    font-weight: 600;
+  }
+
+  .nab-vol-buttons .btn {
+    min-height: 44px;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>
+
+<div
+  class="nab-card js-volume"
+  data-url="{% url 'nabweb.sound' %}"
+  data-csrf="{{ csrf_token }}"
+  data-text-unsaved="{% trans 'Modifications non enregistrées.' %}"
+  data-text-saved="{% trans 'Enregistré : le lapin utilise ces volumes.' %}"
+  data-text-not-applied="{% trans 'Enregistré, mais le programme de la molette ne répond pas : le changement s’appliquera au prochain démarrage.' %}"
+  data-text-testing="{% trans 'Le lapin joue un son…' %}"
+  data-text-tested="{% trans 'Son joué. Les volumes enregistrés sont rétablis.' %}"
+  data-text-mute="{% trans 'La molette est sur muet : tournez-la pour entendre le test.' %}"
+  data-text-asleep="{% trans 'Le lapin dort : réveillez-le pour tester le son.' %}"
+  data-text-busy="{% trans 'Le lapin est occupé : réessayez quand il est au repos.' %}"
+  data-text-error="{% trans 'Le lapin ne répond pas.' %}"
+>
+  <div class="nab-section-head">
+    <h2 class="nab-section-title">{% trans "Volume de la molette" %}</h2>
+    <p class="nab-section-text">
+      {% trans "Molette au milieu : volume moyen. Molette en butée : volume fort. L’autre butée reste muette." %}
+    </p>
+  </div>
+
+  <div class="nab-vol-range js-vol-range">
+    <div class="nab-vol-track"></div>
+    <div class="nab-vol-fill js-vol-fill"></div>
+    <button type="button" class="nab-vol-thumb is-low js-vol-thumb" data-which="low" role="slider" aria-valuemin="0" aria-valuemax="100" aria-label="{% trans 'Volume moyen (molette au milieu)' %}">
+      <span class="nab-vol-label">{% trans "Moyen" %} <span class="js-vol-value"></span></span>
+    </button>
+    <button type="button" class="nab-vol-thumb is-high js-vol-thumb" data-which="high" role="slider" aria-valuemin="0" aria-valuemax="100" aria-label="{% trans 'Volume fort (molette en butée)' %}">
+      <span class="nab-vol-label">{% trans "Fort" %} <span class="js-vol-value"></span></span>
+    </button>
+  </div>
+  <div class="nab-vol-scale"><span>{% trans "très faible" %}</span><span>{% trans "maximum" %}</span></div>
+
+  <div class="nab-vol-buttons">
+    <button type="button" class="btn btn-outline-secondary js-vol-test" data-which="low">▶ {% trans "Tester moyen" %}</button>
+    <button type="button" class="btn btn-outline-secondary js-vol-test" data-which="high">▶ {% trans "Tester fort" %}</button>
+    <button type="button" class="btn btn-primary js-vol-save" disabled>{% trans "Enregistrer" %}</button>
+    <button type="button" class="btn btn-outline-secondary js-vol-reset">{% trans "Valeurs d’origine" %}</button>
+  </div>
+
+  <p class="nab-vol-status js-vol-status" aria-live="polite"></p>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var card = document.querySelector('.js-volume');
+    if (!card) {
+      return;
+    }
+    var range = card.querySelector('.js-vol-range');
+    var fill = card.querySelector('.js-vol-fill');
+    var thumbs = {};
+    Array.prototype.forEach.call(card.querySelectorAll('.js-vol-thumb'), function(thumb) {
+      thumbs[thumb.dataset.which] = thumb;
+    });
+    var saveButton = card.querySelector('.js-vol-save');
+    var resetButton = card.querySelector('.js-vol-reset');
+    var testButtons = card.querySelectorAll('.js-vol-test');
+    var status = card.querySelector('.js-vol-status');
+    var value = { low: 0, high: 0 };
+    var saved = { low: 0, high: 0 };
+    var defaults = { low: 0, high: 0 };
+    var dragging = null;
+    var working = false;
+
+    function text(name) {
+      return card.getAttribute('data-text-' + name);
+    }
+
+    function say(message, kind) {
+      status.textContent = message || '';
+      status.classList.toggle('is-ok', kind === 'ok');
+      status.classList.toggle('is-warning', kind === 'warning');
+    }
+
+    function changed() {
+      return value.low !== saved.low || value.high !== saved.high;
+    }
+
+    function draw() {
+      ['low', 'high'].forEach(function(which) {
+        var thumb = thumbs[which];
+        thumb.style.left = value[which] + '%';
+        thumb.setAttribute('aria-valuenow', value[which]);
+        thumb.setAttribute('aria-valuetext', value[which] + ' %');
+        thumb.querySelector('.js-vol-value').textContent = value[which] + ' %';
+      });
+      fill.style.left = value.low + '%';
+      fill.style.width = (value.high - value.low) + '%';
+      saveButton.disabled = working || !changed();
+      resetButton.disabled = working;
+      Array.prototype.forEach.call(testButtons, function(button) {
+        button.disabled = working;
+      });
+    }
+
+    // Medium never goes above loud: each point pushes the other.
+    function set(which, number) {
+      number = Math.max(0, Math.min(100, Math.round(number)));
+      value[which] = number;
+      if (which === 'low' && value.high < number) {
+        value.high = number;
+      }
+      if (which === 'high' && value.low > number) {
+        value.low = number;
+      }
+      draw();
+      if (changed()) {
+        say(text('unsaved'));
+      }
+    }
+
+    function percentAt(event) {
+      var box = range.getBoundingClientRect();
+      return ((event.clientX - box.left) / box.width) * 100;
+    }
+
+    var startAt = null;
+
+    range.addEventListener('pointerdown', function(event) {
+      var at = percentAt(event);
+      var thumb = event.target.closest('.js-vol-thumb');
+      if (range.setPointerCapture) {
+        range.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+      if (value.low === value.high && (thumb || Math.abs(at - value.low) < 4)) {
+        // Both points on top of each other: the first move decides,
+        // left takes "medium", right takes "loud".
+        dragging = 'either';
+        startAt = at;
+        return;
+      }
+      if (thumb) {
+        dragging = thumb.dataset.which;
+      } else if (value.low === value.high) {
+        dragging = at < value.low ? 'low' : 'high';
+      } else {
+        dragging = Math.abs(at - value.low) <= Math.abs(at - value.high) ? 'low' : 'high';
+      }
+      thumbs[dragging].focus();
+      set(dragging, at);
+    });
+    range.addEventListener('pointermove', function(event) {
+      var at = percentAt(event);
+      if (dragging === 'either') {
+        if (Math.abs(at - startAt) < 1) {
+          return;
+        }
+        dragging = at < startAt ? 'low' : 'high';
+        thumbs[dragging].focus();
+      }
+      if (dragging) {
+        set(dragging, at);
+      }
+    });
+    range.addEventListener('pointerup', function() { dragging = null; });
+    range.addEventListener('pointercancel', function() { dragging = null; });
+    // Holding a point must not scroll the page (browsers without pointer
+    // events on touch screens).
+    range.addEventListener('touchstart', function(event) { event.preventDefault(); }, { passive: false });
+
+    Object.keys(thumbs).forEach(function(which) {
+      thumbs[which].addEventListener('keydown', function(event) {
+        var step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10 }[event.key];
+        if (step) {
+          event.preventDefault();
+          set(which, value[which] + step);
+        }
+      });
+    });
+
+    function post(fields) {
+      var body = new URLSearchParams();
+      body.append('low', value.low);
+      body.append('high', value.high);
+      Object.keys(fields).forEach(function(key) {
+        body.append(key, fields[key]);
+      });
+      return fetch(card.dataset.url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': card.dataset.csrf },
+        body: body
+      }).then(function(response) { return response.json(); });
+    }
+
+    function busy(on) {
+      working = on;
+      draw();
+    }
+
+    saveButton.addEventListener('click', function() {
+      busy(true);
+      post({ action: 'save' })
+        .then(function(data) {
+          if (data.status !== 'ok') {
+            throw new Error();
+          }
+          saved = { low: data.low, high: data.high };
+          value = { low: data.low, high: data.high };
+          say(text(data.applied ? 'saved' : 'not-applied'), data.applied ? 'ok' : 'warning');
+        })
+        .catch(function() { say(text('error'), 'warning'); })
+        .then(function() { busy(false); });
+    });
+
+    resetButton.addEventListener('click', function() {
+      value = { low: defaults.low, high: defaults.high };
+      draw();
+      say(changed() ? text('unsaved') : '');
+    });
+
+    Array.prototype.forEach.call(testButtons, function(button) {
+      button.addEventListener('click', function() {
+        busy(true);
+        say(text('testing'));
+        post({ action: 'test', which: button.dataset.which })
+          .then(function(data) {
+            if (data.status === 'ok') {
+              if (data.wheel === 'mute') {
+                say(text('mute'), 'warning');
+              } else {
+                say(text('tested'), 'ok');
+              }
+            } else if (data.status === 'busy') {
+              say(text(data.state === 'asleep' ? 'asleep' : 'busy'), 'warning');
+            } else {
+              say(text('error'), 'warning');
+            }
+          })
+          .catch(function() { say(text('error'), 'warning'); })
+          .then(function() {
+            busy(false);
+            if (changed()) {
+              say(status.textContent + ' ' + text('unsaved'), status.classList.contains('is-warning') ? 'warning' : 'ok');
+            }
+          });
+      });
+    });
+
+    fetch(card.dataset.url, { credentials: 'same-origin', cache: 'no-store' })
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        if (data.status !== 'ok') {
+          card.hidden = true;
+          return;
+        }
+        saved = { low: data.low, high: data.high };
+        value = { low: data.low, high: data.high };
+        defaults = { low: data.default_low, high: data.default_high };
+        draw();
+      })
+      .catch(function() { say(text('error'), 'warning'); });
+    draw();
+  });
+</script>

@@ -9,7 +9,7 @@
       <div class="nab-kicker">{% trans "Paramètres" %}</div>
       <h1 class="nab-page-title">{% trans "Paramètres" %}</h1>
       <p class="nab-page-intro">
-        {% trans "Langue, tags RFID / NFC et aide." %}
+        {% trans "Langue, tags RFID / NFC, son, Wi-Fi et aide." %}
       </p>
     </div>
 
@@ -71,6 +71,18 @@
           </a>
         </div>
       </div>
+
+      {% if sound_available %}
+        <div class="col-12 col-lg-6 mb-4">
+          {% include "nabweb/settings/_sound.html" %}
+        </div>
+      {% endif %}
+
+      {% if wifi_available %}
+        <div class="col-12 col-lg-6 mb-4">
+          {% include "nabweb/settings/_wifi.html" %}
+        </div>
+      {% endif %}
 
       <div class="col-12 mb-4">
         <div class="nab-card">

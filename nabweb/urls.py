@@ -18,6 +18,7 @@ from .views import (
     NabWebSettingsView,
     NabWebShutdownView,
     NabWebSleepView,
+    NabWebSoundView,
     NabWebSytemInfoView,
     NabWebUpgradeCheckNowView,
     NabWebUpgradeNowView,
@@ -26,6 +27,7 @@ from .views import (
     NabWebUpgradeView,
     NabWebView,
     NabWebWakeupView,
+    NabWebWifiView,
 )
 
 urlpatterns: List[Union[URLResolver, URLPattern]] = [
@@ -38,6 +40,8 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
 
     # --- Paramètres ---
     path("settings/", NabWebSettingsView.as_view(), name="nabweb.settings"),
+    path("settings/sound", NabWebSoundView.as_view(), name="nabweb.sound"),
+    path("settings/wifi", NabWebWifiView.as_view(), name="nabweb.wifi"),
 
     # --- RFID ---
     path("rfid/", NabWebRfidView.as_view(), name="nabweb.rfid"),

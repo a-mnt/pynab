@@ -1,0 +1,592 @@
+{% load i18n %}
+{# Wi-Fi: network in use, Internet test, joining another network. #}
+<style>
+  .nab-wifi-current {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .nab-wifi-current-text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .nab-wifi-name {
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nab-wifi-sub {
+    color: #6b7280;
+    font-size: 0.88rem;
+  }
+
+  .nab-wifi-bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 16px;
+    flex: 0 0 auto;
+  }
+
+  .nab-wifi-bars i {
+    width: 4px;
+    border-radius: 1px;
+    background: #d5d9e3;
+  }
+
+  .nab-wifi-bars i:nth-child(1) { height: 25%; }
+  .nab-wifi-bars i:nth-child(2) { height: 50%; }
+  .nab-wifi-bars i:nth-child(3) { height: 75%; }
+  .nab-wifi-bars i:nth-child(4) { height: 100%; }
+
+  .nab-wifi-bars[data-bars="1"] i:nth-child(-n+1),
+  .nab-wifi-bars[data-bars="2"] i:nth-child(-n+2),
+  .nab-wifi-bars[data-bars="3"] i:nth-child(-n+3),
+  .nab-wifi-bars[data-bars="4"] i:nth-child(-n+4) {
+    background: #3341b5;
+  }
+
+  .nab-wifi-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .nab-wifi-status {
+    min-height: 1.5em;
+    margin: 10px 0 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
+  .nab-wifi-status.is-ok {
+    color: #047857;
+    font-weight: 600;
+  }
+
+  .nab-wifi-status.is-warning {
+    color: #b45309;
+    font-weight: 600;
+  }
+
+  .nab-wifi-panel {
+    border-top: 1px solid #e5e7eb;
+    margin-top: 16px;
+    padding-top: 12px;
+  }
+
+  .nab-wifi-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .nab-wifi-link {
+    border: 0;
+    background: none;
+    color: #3341b5;
+    font-weight: 600;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .nab-wifi-link:disabled {
+    opacity: 0.5;
+  }
+
+  .nab-wifi-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+  }
+
+  .nab-wifi-net {
+    border-radius: 12px;
+  }
+
+  .nab-wifi-net.is-open {
+    background: #f5f6fa;
+  }
+
+  .nab-wifi-net-button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: #111827;
+    text-align: left;
+  }
+
+  .nab-wifi-net-button:hover {
+    background: #f5f6fa;
+  }
+
+  .nab-wifi-net-button:disabled {
+    cursor: default;
+    background: none;
+  }
+
+  .nab-wifi-net-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nab-wifi-net-info {
+    color: #6b7280;
+    font-size: 0.85rem;
+  }
+
+  .nab-wifi-form {
+    padding: 4px 10px 12px;
+  }
+
+  .nab-wifi-form label {
+    display: block;
+    margin: 6px 0 4px;
+    font-size: 0.85rem;
+    color: #6b7280;
+  }
+
+  .nab-wifi-form .form-control {
+    min-height: 44px;
+  }
+
+  .nab-wifi-form .nab-wifi-show {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 0;
+    min-height: 32px;
+  }
+
+  .nab-wifi-form .btn {
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  .nab-wifi-hidden {
+    background: #f5f6fa;
+    border-radius: 12px;
+    margin-top: 4px;
+  }
+
+  .nab-wifi-note {
+    margin: 12px 0 0;
+    font-size: 0.85rem;
+    color: #6b7280;
+  }
+
+  .nab-wifi-buttons .btn {
+    min-height: 44px;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>
+
+<div
+  class="nab-card js-wifi"
+  data-url="{% url 'nabweb.wifi' %}"
+  data-csrf="{{ csrf_token }}"
+  data-text-loading="{% trans 'Lecture du Wi-Fi…' %}"
+  data-text-connected="{% trans 'Connecté' %}"
+  data-text-hotspot="{% trans 'Réseau de configuration du lapin' %}"
+  data-text-disconnected="{% trans 'Non connecté' %}"
+  data-text-testing="{% trans 'Test en cours…' %}"
+  data-text-internet-ok="{% trans 'Internet fonctionne (réponse en %s ms).' %}"
+  data-text-no-dns="{% trans 'Pas d’Internet : les noms de sites ne sont pas trouvés (box ou DNS).' %}"
+  data-text-no-answer="{% trans 'Pas d’Internet : le réseau ne laisse pas sortir le lapin.' %}"
+  data-text-scanning="{% trans 'Recherche des réseaux…' %}"
+  data-text-scan-failed="{% trans 'La recherche a échoué. Réessayez.' %}"
+  data-text-none="{% trans 'Aucun réseau trouvé.' %}"
+  data-text-in-use="{% trans 'connecté' %}"
+  data-text-open="{% trans 'ouvert' %}"
+  data-text-password="{% trans 'Mot de passe' %}"
+  data-text-show-password="{% trans 'Afficher le mot de passe' %}"
+  data-text-connect-to="{% trans 'Se connecter à « %s »' %}"
+  data-text-connecting="{% trans 'Connexion à « %s »… (jusqu’à une minute)' %}"
+  data-text-joined="{% trans 'Connecté à « %s ».' %}"
+  data-text-lost="{% trans 'Le lapin a peut-être changé de réseau : si cette page ne répond plus, connectez votre téléphone au même réseau que lui.' %}"
+  data-text-wrong-password="{% trans 'Mot de passe incorrect. Le lapin est resté sur son réseau.' %}"
+  data-text-not-found="{% trans 'Réseau introuvable. Le lapin est resté sur son réseau.' %}"
+  data-text-failed="{% trans 'Connexion impossible. Le lapin est resté sur son réseau.' %}"
+  data-text-bad-password="{% trans 'Le mot de passe doit faire entre 8 et 63 caractères.' %}"
+  data-text-busy="{% trans 'Un changement de réseau est déjà en cours.' %}"
+  data-text-error="{% trans 'Le lapin ne répond pas.' %}"
+>
+  <div class="nab-section-head">
+    <h2 class="nab-section-title">{% trans "Wi-Fi" %}</h2>
+  </div>
+
+  <div class="nab-wifi-current">
+    <span class="nab-wifi-bars js-wifi-bars" data-bars="0" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <div class="nab-wifi-current-text">
+      <div class="nab-wifi-name js-wifi-name">—</div>
+      <div class="nab-wifi-sub js-wifi-sub"></div>
+    </div>
+  </div>
+
+  <div class="nab-wifi-buttons">
+    <button type="button" class="btn btn-outline-secondary js-wifi-test">{% trans "Tester Internet" %}</button>
+    <button type="button" class="btn btn-outline-secondary js-wifi-change" aria-expanded="false">{% trans "Changer" %}</button>
+  </div>
+  <p class="nab-wifi-status js-wifi-status" aria-live="polite"></p>
+
+  <div class="nab-wifi-panel js-wifi-panel" hidden>
+    <div class="nab-wifi-panel-head">
+      <strong>{% trans "Réseaux à proximité" %}</strong>
+      <button type="button" class="nab-wifi-link js-wifi-scan">{% trans "Actualiser" %}</button>
+    </div>
+    <ul class="nab-wifi-list js-wifi-list"></ul>
+
+    <button type="button" class="nab-wifi-link js-wifi-hidden-toggle" aria-expanded="false">+ {% trans "Réseau masqué" %}</button>
+    <div class="nab-wifi-form nab-wifi-hidden js-wifi-hidden" hidden>
+      <label for="nab-wifi-ssid">{% trans "Nom du réseau (SSID)" %}</label>
+      <input type="text" class="form-control" id="nab-wifi-ssid" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="32">
+      <label for="nab-wifi-hidden-password">{% trans "Mot de passe" %}</label>
+      <input type="password" class="form-control" id="nab-wifi-hidden-password" autocomplete="off">
+      <button type="button" class="btn btn-primary js-wifi-hidden-connect">{% trans "Se connecter" %}</button>
+    </div>
+
+    <p class="nab-wifi-note">
+      {% trans "Si la connexion échoue, le lapin revient tout seul sur le réseau actuel. Si elle réussit et que votre téléphone n’est pas sur le nouveau réseau, cette page ne répondra plus : c’est normal." %}
+    </p>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var card = document.querySelector('.js-wifi');
+    if (!card) {
+      return;
+    }
+    var status = card.querySelector('.js-wifi-status');
+    var panel = card.querySelector('.js-wifi-panel');
+    var list = card.querySelector('.js-wifi-list');
+    var changeButton = card.querySelector('.js-wifi-change');
+    var testButton = card.querySelector('.js-wifi-test');
+    var scanButton = card.querySelector('.js-wifi-scan');
+    var hiddenBox = card.querySelector('.js-wifi-hidden');
+    var hiddenToggle = card.querySelector('.js-wifi-hidden-toggle');
+    var watching = null;
+
+    function text(name, value) {
+      var message = card.getAttribute('data-text-' + name) || '';
+      return value === undefined ? message : message.replace('%s', value);
+    }
+
+    function say(message, kind) {
+      status.textContent = message || '';
+      status.classList.toggle('is-ok', kind === 'ok');
+      status.classList.toggle('is-warning', kind === 'warning');
+    }
+
+    function getJSON(query) {
+      return fetch(card.dataset.url + (query || ''), { credentials: 'same-origin', cache: 'no-store' })
+        .then(function(response) { return response.json(); });
+    }
+
+    function post(fields) {
+      var body = new URLSearchParams();
+      Object.keys(fields).forEach(function(key) {
+        body.append(key, fields[key]);
+      });
+      return fetch(card.dataset.url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': card.dataset.csrf },
+        body: body
+      }).then(function(response) { return response.json(); });
+    }
+
+    function showCurrent(current) {
+      var name = card.querySelector('.js-wifi-name');
+      var sub = card.querySelector('.js-wifi-sub');
+      card.querySelector('.js-wifi-bars').dataset.bars = current.connected ? (current.bars || 0) : 0;
+      if (!current.connected) {
+        name.textContent = text('disconnected');
+        sub.textContent = '';
+      } else if (current.hotspot) {
+        name.textContent = text('hotspot');
+        sub.textContent = current.address || '';
+      } else {
+        name.textContent = current.ssid || '—';
+        sub.textContent = text('connected') + (current.address ? ' · ' + current.address : '');
+      }
+    }
+
+    function setBusy(on) {
+      testButton.disabled = on;
+      changeButton.disabled = on;
+      Array.prototype.forEach.call(panel.querySelectorAll('button, input'), function(element) {
+        element.disabled = on;
+      });
+    }
+
+    /* ---------- Internet test ---------- */
+    testButton.addEventListener('click', function() {
+      testButton.disabled = true;
+      say(text('testing'));
+      post({ action: 'test' })
+        .then(function(data) {
+          var internet = data.internet || {};
+          if (internet.ok) {
+            say(text('internet-ok', internet.ms), 'ok');
+          } else {
+            say(text(internet.reason === 'no-dns' ? 'no-dns' : 'no-answer'), 'warning');
+          }
+        })
+        .catch(function() { say(text('error'), 'warning'); })
+        .then(function() { testButton.disabled = false; });
+    });
+
+    /* ---------- Nearby networks ---------- */
+    function bars(count) {
+      var span = document.createElement('span');
+      span.className = 'nab-wifi-bars';
+      span.dataset.bars = count;
+      span.setAttribute('aria-hidden', 'true');
+      span.innerHTML = '<i></i><i></i><i></i><i></i>';
+      return span;
+    }
+
+    function closeForms() {
+      Array.prototype.forEach.call(list.querySelectorAll('.nab-wifi-net'), function(item) {
+        item.classList.remove('is-open');
+        var form = item.querySelector('.nab-wifi-form');
+        if (form) {
+          form.remove();
+        }
+      });
+    }
+
+    function openForm(item, network) {
+      var wasOpen = item.classList.contains('is-open');
+      closeForms();
+      if (wasOpen) {
+        return;
+      }
+      item.classList.add('is-open');
+      var form = document.createElement('div');
+      form.className = 'nab-wifi-form';
+      var input = null;
+      if (network.secure) {
+        var id = 'nab-wifi-pw-' + Math.random().toString(36).slice(2);
+        var label = document.createElement('label');
+        label.setAttribute('for', id);
+        label.textContent = text('password');
+        input = document.createElement('input');
+        input.type = 'password';
+        input.className = 'form-control';
+        input.id = id;
+        input.autocomplete = 'off';
+        var show = document.createElement('label');
+        show.className = 'nab-wifi-show';
+        var box = document.createElement('input');
+        box.type = 'checkbox';
+        box.addEventListener('change', function() {
+          input.type = box.checked ? 'text' : 'password';
+        });
+        show.appendChild(box);
+        show.appendChild(document.createTextNode(text('show-password')));
+        form.appendChild(label);
+        form.appendChild(input);
+        form.appendChild(show);
+      }
+      var go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn btn-primary';
+      go.textContent = text('connect-to', network.ssid);
+      go.addEventListener('click', function() {
+        connect(network.ssid, input ? input.value : '', false, network.security);
+      });
+      form.appendChild(go);
+      item.appendChild(form);
+      if (input) {
+        input.focus();
+        input.addEventListener('keydown', function(event) {
+          if (event.key === 'Enter') {
+            go.click();
+          }
+        });
+      }
+    }
+
+    function showNetworks(networks) {
+      list.textContent = '';
+      if (!networks.length) {
+        var empty = document.createElement('li');
+        empty.className = 'nab-wifi-status';
+        empty.textContent = text('none');
+        list.appendChild(empty);
+        return;
+      }
+      networks.forEach(function(network) {
+        var item = document.createElement('li');
+        item.className = 'nab-wifi-net';
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'nab-wifi-net-button';
+        var name = document.createElement('span');
+        name.className = 'nab-wifi-net-name';
+        name.textContent = network.ssid;
+        var info = document.createElement('span');
+        info.className = 'nab-wifi-net-info';
+        info.textContent = network.current ? text('in-use') : (network.secure ? '🔒' : text('open'));
+        button.appendChild(bars(network.bars));
+        button.appendChild(name);
+        button.appendChild(info);
+        button.disabled = network.current;
+        button.addEventListener('click', function() {
+          openForm(item, network);
+        });
+        item.appendChild(button);
+        list.appendChild(item);
+      });
+    }
+
+    function scan() {
+      list.innerHTML = '';
+      var waiting = document.createElement('li');
+      waiting.className = 'nab-wifi-status';
+      waiting.textContent = text('scanning');
+      list.appendChild(waiting);
+      scanButton.disabled = true;
+      getJSON('?scan=1')
+        .then(function(data) {
+          if (data.current) {
+            showCurrent(data.current);
+          }
+          if (data.scan_failed) {
+            waiting.textContent = text('scan-failed');
+          } else {
+            showNetworks(data.networks || []);
+          }
+        })
+        .catch(function() { waiting.textContent = text('error'); })
+        .then(function() { scanButton.disabled = false; });
+    }
+
+    changeButton.addEventListener('click', function() {
+      var open = panel.hidden;
+      panel.hidden = !open;
+      changeButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        scan();
+      }
+    });
+    scanButton.addEventListener('click', scan);
+
+    hiddenToggle.addEventListener('click', function() {
+      var open = hiddenBox.hidden;
+      hiddenBox.hidden = !open;
+      hiddenToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        card.querySelector('#nab-wifi-ssid').focus();
+      }
+    });
+    card.querySelector('.js-wifi-hidden-connect').addEventListener('click', function() {
+      var ssid = card.querySelector('#nab-wifi-ssid').value.trim();
+      if (!ssid) {
+        card.querySelector('#nab-wifi-ssid').focus();
+        return;
+      }
+      connect(ssid, card.querySelector('#nab-wifi-hidden-password').value, true, '');
+    });
+
+    /* ---------- Joining a network ---------- */
+    function connect(ssid, password, hidden, security) {
+      if (password && (password.length < 8 || password.length > 63)) {
+        say(text('bad-password'), 'warning');
+        return;
+      }
+      setBusy(true);
+      say(text('connecting', ssid));
+      post({ action: 'connect', ssid: ssid, password: password, hidden: hidden ? '1' : '0', security: security || '' })
+        .then(function(data) {
+          if (data.status === 'busy') {
+            say(text('busy'), 'warning');
+          } else if (data.status !== 'ok') {
+            say(text(data.reason === 'bad-password' ? 'bad-password' : 'failed'), 'warning');
+            setBusy(false);
+            return;
+          }
+          follow(ssid, Date.now());
+        })
+        .catch(function() {
+          say(text('error'), 'warning');
+          setBusy(false);
+        });
+    }
+
+    // Ask how it went until the change is over. If the rabbit no longer
+    // answers, it most likely joined the new network.
+    function follow(ssid, started) {
+      clearTimeout(watching);
+      watching = setTimeout(function() {
+        getJSON('')
+          .then(function(data) {
+            var job = data.job || {};
+            if (data.current) {
+              showCurrent(data.current);
+            }
+            if (job.state === 'connecting') {
+              follow(ssid, started);
+              return;
+            }
+            setBusy(false);
+            if (job.state === 'connected') {
+              say(text('joined', job.ssid || ssid), 'ok');
+              panel.hidden = true;
+              changeButton.setAttribute('aria-expanded', 'false');
+              list.textContent = '';
+            } else if (job.state === 'failed') {
+              say(text(job.reason === 'wrong-password' || job.reason === 'not-found' ? job.reason : 'failed'), 'warning');
+            }
+          })
+          .catch(function() {
+            if (Date.now() - started < 120000) {
+              say(text('lost'), 'warning');
+              follow(ssid, started);
+            } else {
+              setBusy(false);
+            }
+          });
+      }, 2000);
+    }
+
+    /* ---------- Start ---------- */
+    say(text('loading'));
+    getJSON('')
+      .then(function(data) {
+        if (data.status !== 'ok') {
+          card.hidden = true;
+          return;
+        }
+        say('');
+        showCurrent(data.current);
+        if (data.job && data.job.state === 'connecting') {
+          setBusy(true);
+          say(text('connecting', data.job.ssid));
+          follow(data.job.ssid, Date.now());
+        }
+      })
+      .catch(function() { say(text('error'), 'warning'); });
+  });
+</script>
