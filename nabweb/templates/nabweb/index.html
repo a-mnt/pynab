@@ -64,6 +64,20 @@
               >{% if radio_status.is_playing %}{% trans "Radio" %} : {{ radio_status.selected_name }}{% elif rabbit_state == "playing" %}{% trans "Lecture d’un son" %}{% elif rabbit_state == "interactive" %}{% trans "Service interactif" %}{% elif rabbit_state == "recording" %}{% trans "Écoute" %}{% else %}{% trans "Aucun service" %}{% endif %}</span>
             </div>
 
+            {% if schedule %}
+              <div class="nab-status-item nab-schedule-item">
+                <span class="nab-schedule-text">
+                  <span class="nab-status-label">{% trans "Horaires" %}</span>
+                  <span class="nab-status-value js-schedule-value"
+                        data-text-main="{% trans 'Habituels' %}">{% if schedule.alt %}{{ schedule.name }}{% else %}{% trans "Habituels" %}{% endif %} · {{ schedule.wake }} → {{ schedule.sleep }}</span>
+                </span>
+                <button type="button" class="nab-schedule-switch js-schedule-switch" role="switch"
+                        aria-checked="{% if schedule.alt %}true{% else %}false{% endif %}"
+                        aria-label="{% trans 'Utiliser les autres horaires' %}"
+                        data-url="{% url 'nabclockd.schedule' %}"></button>
+              </div>
+            {% endif %}
+
             <div class="nab-status-item">
               <span class="nab-status-label">{% trans "Oreilles" %}</span>
               {% if not ears %}
@@ -107,6 +121,109 @@
       </div>
     </div>
   </section>
+
+  <style>
+    /* Text on the left, switch on the right, on phones too. */
+    .nab-status-item.nab-schedule-item {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nab-schedule-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .nab-schedule-text .nab-status-value {
+      text-align: left;
+    }
+
+    .nab-schedule-switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 52px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      border-radius: 16px;
+      background: #d1d5db;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .nab-schedule-switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: transform 0.15s;
+    }
+
+    .nab-schedule-switch[aria-checked="true"] {
+      background: #3341b5;
+    }
+
+    .nab-schedule-switch[aria-checked="true"]::after {
+      transform: translateX(20px);
+    }
+
+    .nab-schedule-switch:disabled {
+      opacity: 0.5;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nab-schedule-switch,
+      .nab-schedule-switch::after {
+        transition: none;
+      }
+    }
+  </style>
+
+  <script>
+    // Switch between the usual and the other wake up / sleep times.
+    document.addEventListener('DOMContentLoaded', function() {
+      var button = document.querySelector('.js-schedule-switch');
+      if (!button) {
+        return;
+      }
+      var value = document.querySelector('.js-schedule-value');
+      button.addEventListener('click', function() {
+        var next = button.getAttribute('aria-checked') !== 'true';
+        var body = new URLSearchParams();
+        body.append('use_alt_schedule', next ? 'true' : 'false');
+        button.disabled = true;
+        fetch(button.dataset.url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+          body: body
+        })
+          .then(function(response) { return response.json(); })
+          .then(function(data) {
+            if (data.status !== 'ok') {
+              throw new Error();
+            }
+            button.setAttribute('aria-checked', data.alt ? 'true' : 'false');
+            value.textContent = (data.alt ? data.name : value.dataset.textMain) + ' · ' + data.wake + ' → ' + data.sleep;
+          })
+          .catch(function() {
+            if (window.jQuery && window.jQuery.bootstrapGrowl) {
+              window.jQuery.bootstrapGrowl('{% trans "Le changement n’a pas été enregistré." %}', { type: 'danger' });
+            }
+          })
+          .then(function() {
+            button.disabled = false;
+          });
+      });
+    });
+  </script>
 
   <script>
     // "En cours" follows the radio (see nab-player.js) without reloading.

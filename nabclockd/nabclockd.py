@@ -10,7 +10,7 @@ from dateutil import tz
 from nabcommon import nabservice
 from nabcommon.typing import NabdPacket
 
-from . import rfid_data
+from . import rfid_data, schedule
 
 
 class NabClockd(nabservice.NabService):
@@ -86,7 +86,17 @@ class NabClockd(nabservice.NabService):
         response = []
         if self.synchronized_since_boot():
             should_sleep = None
-            if self.config.settings_per_day:
+            if self.config.use_alt_schedule:
+                # Other times ("Vacances"...), stored day by day. Until 3am,
+                # the night still belongs to the previous day.
+                day = schedule.DAYS[(now + datetime.timedelta(hours=-3)).weekday()]
+                (
+                    wakeup_hour,
+                    wakeup_min,
+                    sleep_hour,
+                    sleep_min,
+                ) = schedule.times_for(self.config, day)
+            elif self.config.settings_per_day:
                 # Until 3am, we keep the same day name
                 # to obtain the settings from the current (previous) day,
                 # so the user can put until 3am for the sleep time.

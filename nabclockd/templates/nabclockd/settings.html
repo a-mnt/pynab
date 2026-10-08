@@ -1,260 +1,459 @@
 {% load i18n %}
 <div class="card" id="nabclockd-settings">
-  <form action="/nabclockd/settings">
+  <style>
+    #nabclockd-settings .nab-sw-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 52px;
+    }
+
+    #nabclockd-settings .nab-sw-text {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    #nabclockd-settings .nab-sw-title {
+      font-weight: 700;
+    }
+
+    #nabclockd-settings .nab-sw-sub {
+      color: #6b7280;
+      font-size: 0.88rem;
+    }
+
+    #nabclockd-settings .nab-switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 52px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      border-radius: 16px;
+      background: #d1d5db;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #nabclockd-settings .nab-switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transition: transform 0.15s;
+    }
+
+    #nabclockd-settings .nab-switch[aria-checked="true"] {
+      background: #3341b5;
+    }
+
+    #nabclockd-settings .nab-switch[aria-checked="true"]::after {
+      transform: translateX(20px);
+    }
+
+    #nabclockd-settings .nab-switch:disabled {
+      opacity: 0.5;
+    }
+
+    #nabclockd-settings .nab-plan {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+    }
+
+    #nabclockd-settings .nab-plan.is-active {
+      border-color: #3341b5;
+      background: #eef2ff;
+    }
+
+    #nabclockd-settings .nab-plan-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    #nabclockd-settings .nab-plan-name {
+      width: 11em;
+      max-width: 100%;
+      padding: 0;
+      border: 0;
+      border-bottom: 1px dashed #6b7280;
+      background: transparent;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    #nabclockd-settings .nab-plan-head .nab-plan-name {
+      flex: 1 1 auto;
+      min-width: 0;
+      height: auto !important;
+      min-height: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      border-bottom: 1px dashed #6b7280 !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+
+    #nabclockd-settings .btn {
+      white-space: nowrap;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    #nabclockd-settings .nab-plan-badge {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      visibility: hidden;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: #3341b5;
+      color: #fff;
+      font-size: 0.75rem;
+    }
+
+    #nabclockd-settings .nab-plan.is-active .nab-plan-badge {
+      visibility: visible;
+    }
+
+    #nabclockd-settings .nab-sw-row.is-small {
+      min-height: 44px;
+      margin-top: 4px;
+      font-size: 0.92rem;
+    }
+
+    #nabclockd-settings .nab-sw-row.is-small .nab-switch {
+      transform: scale(0.85);
+      transform-origin: right center;
+    }
+
+    #nabclockd-settings .nab-times {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    #nabclockd-settings .nab-times label,
+    #nabclockd-settings .nab-times-title {
+      display: block;
+      margin: 0 0 4px;
+      font-size: 0.82rem;
+      color: #6b7280;
+    }
+
+    #nabclockd-settings .nab-times-title {
+      grid-column: 1 / -1;
+      margin: 4px 0 -4px;
+      font-weight: 700;
+      color: #374151;
+    }
+
+    #nabclockd-settings input[type="time"] {
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      padding: 0 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      background: #fff;
+      color: #111827;
+    }
+
+    #nabclockd-settings .nab-day {
+      display: grid;
+      grid-template-columns: 2.6em minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+      font-size: 0.9rem;
+    }
+
+    #nabclockd-settings .nab-day input[type="time"] {
+      min-height: 40px;
+      padding: 0 6px;
+    }
+
+    #nabclockd-settings .nab-hint {
+      margin: 8px 0 0;
+      font-size: 0.82rem;
+      color: #6b7280;
+    }
+
+    #nabclockd-settings .nab-others {
+      margin-top: 16px;
+      padding-top: 6px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    #nabclockd-settings .nab-tz {
+      margin-top: 8px;
+    }
+
+    #nabclockd-settings .nab-status {
+      min-height: 1.4em;
+      margin: 10px 0 0;
+      font-size: 0.9rem;
+      color: #047857;
+      font-weight: 600;
+    }
+
+    #nabclockd-settings .nab-status.is-warning {
+      color: #b45309;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #nabclockd-settings .nab-switch,
+      #nabclockd-settings .nab-switch::after {
+        transition: none;
+      }
+    }
+  </style>
+
+  <form action="/nabclockd/settings" autocomplete="off">
     {% csrf_token %}
-    <div class="card-header">
-      <h5 class="card-title">{% trans "Clock" %}</h5>
-    </div>
     <div class="card-body">
-      <div class="form-group row">
-        <label for="chimeHoursBtn" class="col-6 col-form-label">{% trans "Chime hours" %}</label>
-        <div class="col-6">
-          <button id="chimeHoursBtn" type="button" class="btn btn-toggle{% if config.chime_hour %} active{% endif %}" data-name="chime_hour" data-toggle="button" aria-pressed="false" autocomplete="off"><div class="handle"></div></button>
-          <input name="chime_hour" type="hidden" value="{% if config.chime_hour %}true{% else %}false{% endif %}" />
+      <div class="nab-sw-row">
+        <div class="nab-sw-text">
+          <div class="nab-sw-title">{% trans "Horaires" %} « <span class="js-alt-name-mirror">{{ alt_name }}</span> »</div>
+          <div class="nab-sw-sub js-schedule-state"
+               data-text-main="{% trans 'Le lapin suit ses horaires habituels.' %}"
+               data-text-alt="{% trans 'Le lapin suit les horaires « %s ».' %}">
+          </div>
         </div>
+        <button type="button" class="nab-switch js-use-alt" role="switch"
+                aria-checked="{% if config.use_alt_schedule %}true{% else %}false{% endif %}"
+                aria-label="{% trans 'Utiliser les autres horaires' %}"
+                data-url="/nabclockd/schedule"></button>
       </div>
-      <div class="form-group row">
-        <label for="distinctTimesBtn" class="col-6 col-form-label">{% trans "Custom hours for each day of the week" %}</label>
-        <div class="col-6">
-          <button id="distinctTimesBtn" type="button" class="btn btn-toggle{% if config.settings_per_day %} active{% endif %}" data-name="settings_per_day" data-toggle="button" aria-pressed="false" autocomplete="off"><div class="handle"></div></button>
-          <input name="settings_per_day" type="hidden" value="{% if config.settings_per_day %}true{% else %}false{% endif %}" />
-        </div>
-      </div>      
-      <div id="commonWakeUpTimes" style="{% if config.settings_per_day %}display:none{% endif %}">      
-        <div class="form-group row">
-          <label for="wakeupTime" class="col-6 col-form-label">{% trans "Wake up time" %}</label>
-          <div class="col-6">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTime" name="wakeup_time" type="text" class="form-control" value="{% if config.wakeup_hour < 10 %}0{% endif %}{{ config.wakeup_hour }}:{% if config.wakeup_min < 10 %}0{% endif %}{{ config.wakeup_min }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
+
+      {% for plan in plans %}
+        <div class="nab-plan js-plan{% if plan.active %} is-active{% endif %}" data-prefix="{{ plan.prefix }}">
+          <div class="nab-plan-head">
+            {% if plan.prefix == "main" %}
+              <span>{% trans "Horaires habituels" %}</span>
+            {% else %}
+              <input type="text" class="nab-plan-name js-alt-name" name="alt_name" value="{{ plan.name }}" maxlength="30" aria-label="{% trans 'Nom des autres horaires' %}">
+            {% endif %}
+            <span class="nab-plan-badge">{% trans "En cours" %}</span>
           </div>
-        </div>
-        <div class="form-group row">
-          <label for="sleepTime" class="col-6 col-form-label">{% trans "Sleep time" %}</label>
-          <div class="col-6">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTime" name="sleep_time" type="text" class="form-control" value="{% if config.sleep_hour < 10 %}0{% endif %}{{ config.sleep_hour }}:{% if config.sleep_min < 10 %}0{% endif %}{{ config.sleep_min }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
+
+          <input type="hidden" class="js-mode" name="{{ plan.prefix }}_mode" value="{{ plan.mode }}">
+
+          <div class="nab-times" data-mode="all"{% if plan.mode != 'all' %} hidden{% endif %}>
+            <div><label for="{{ plan.prefix }}-wake">{% trans "Réveil" %}</label><input type="time" id="{{ plan.prefix }}-wake" name="{{ plan.prefix }}_wake" value="{{ plan.times.wake }}"></div>
+            <div><label for="{{ plan.prefix }}-sleep">{% trans "Coucher" %}</label><input type="time" id="{{ plan.prefix }}-sleep" name="{{ plan.prefix }}_sleep" value="{{ plan.times.sleep }}"></div>
           </div>
-        </div>
-      </div>
-      <div id="distinctWakeUpTimes" style="{% if not config.settings_per_day %}display:none{% endif %}">
-        <div class="form-group row">
-          <label for="wakeupTimeMonday" class="col-4 col-form-label">{% trans "Monday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeMonday" name="wakeup_time_monday" type="text" class="form-control" value="{% if config.wakeup_hour_monday < 10 %}0{% endif %}{{ config.wakeup_hour_monday }}:{% if config.wakeup_min_monday < 10 %}0{% endif %}{{ config.wakeup_min_monday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
+
+          <div data-mode="weekend"{% if plan.mode != 'weekend' %} hidden{% endif %}>
+            <div class="nab-times">
+              <span class="nab-times-title">{% trans "Semaine" %}</span>
+              <div><label for="{{ plan.prefix }}-week-wake">{% trans "Réveil" %}</label><input type="time" id="{{ plan.prefix }}-week-wake" name="{{ plan.prefix }}_week_wake" value="{{ plan.times.week_wake }}"></div>
+              <div><label for="{{ plan.prefix }}-week-sleep">{% trans "Coucher" %}</label><input type="time" id="{{ plan.prefix }}-week-sleep" name="{{ plan.prefix }}_week_sleep" value="{{ plan.times.week_sleep }}"></div>
+              <span class="nab-times-title">{% trans "Week-end" %}</span>
+              <div><label for="{{ plan.prefix }}-weekend-wake">{% trans "Réveil" %}</label><input type="time" id="{{ plan.prefix }}-weekend-wake" name="{{ plan.prefix }}_weekend_wake" value="{{ plan.times.weekend_wake }}"></div>
+              <div><label for="{{ plan.prefix }}-weekend-sleep">{% trans "Coucher" %}</label><input type="time" id="{{ plan.prefix }}-weekend-sleep" name="{{ plan.prefix }}_weekend_sleep" value="{{ plan.times.weekend_sleep }}"></div>
             </div>
+            <p class="nab-hint">{% trans "Week-end : réveil samedi et dimanche matin, coucher vendredi et samedi soir." %}</p>
           </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeMonday" name="sleep_time_monday" type="text" class="form-control" value="{% if config.sleep_hour_monday < 10 %}0{% endif %}{{ config.sleep_hour_monday }}:{% if config.sleep_min_monday < 10 %}0{% endif %}{{ config.sleep_min_monday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeTuesday" class="col-4 col-form-label">{% trans "Tuesday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeTuesday" name="wakeup_time_tuesday" type="text" class="form-control" value="{% if config.wakeup_hour_tuesday < 10 %}0{% endif %}{{ config.wakeup_hour_tuesday }}:{% if config.wakeup_min_tuesday < 10 %}0{% endif %}{{ config.wakeup_min_tuesday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeTuesday" name="sleep_time_tuesday" type="text" class="form-control" value="{% if config.sleep_hour_tuesday < 10 %}0{% endif %}{{ config.sleep_hour_tuesday }}:{% if config.sleep_min_tuesday < 10 %}0{% endif %}{{ config.sleep_min_tuesday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeWednesday" class="col-4 col-form-label">{% trans "Wednesday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeWednesday" name="wakeup_time_wednesday" type="text" class="form-control" value="{% if config.wakeup_hour_wednesday < 10 %}0{% endif %}{{ config.wakeup_hour_wednesday }}:{% if config.wakeup_min_wednesday < 10 %}0{% endif %}{{ config.wakeup_min_wednesday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeWednesday" name="sleep_time_wednesday" type="text" class="form-control" value="{% if config.sleep_hour_wednesday < 10 %}0{% endif %}{{ config.sleep_hour_wednesday }}:{% if config.sleep_min_wednesday < 10 %}0{% endif %}{{ config.sleep_min_wednesday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeThursday" class="col-4 col-form-label">{% trans "Thursday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeThursday" name="wakeup_time_thursday" type="text" class="form-control" value="{% if config.wakeup_hour_thursday < 10 %}0{% endif %}{{ config.wakeup_hour_thursday }}:{% if config.wakeup_min_thursday < 10 %}0{% endif %}{{ config.wakeup_min_thursday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeThursday" name="sleep_time_thursday" type="text" class="form-control" value="{% if config.sleep_hour_thursday < 10 %}0{% endif %}{{ config.sleep_hour_thursday }}:{% if config.sleep_min_thursday < 10 %}0{% endif %}{{ config.sleep_min_thursday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeFriday" class="col-4 col-form-label">{% trans "Friday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeFriday" name="wakeup_time_friday" type="text" class="form-control" value="{% if config.wakeup_hour_friday < 10 %}0{% endif %}{{ config.wakeup_hour_friday }}:{% if config.wakeup_min_friday < 10 %}0{% endif %}{{ config.wakeup_min_friday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeFriday" name="sleep_time_friday" type="text" class="form-control" value="{% if config.sleep_hour_friday < 10 %}0{% endif %}{{ config.sleep_hour_friday }}:{% if config.sleep_min_friday < 10 %}0{% endif %}{{ config.sleep_min_friday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeSaturday" class="col-4 col-form-label">{% trans "Saturday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeSaturday" name="wakeup_time_saturday" type="text" class="form-control" value="{% if config.wakeup_hour_saturday < 10 %}0{% endif %}{{ config.wakeup_hour_saturday }}:{% if config.wakeup_min_saturday < 10 %}0{% endif %}{{ config.wakeup_min_saturday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeSaturday" name="sleep_time_saturday" type="text" class="form-control" value="{% if config.sleep_hour_saturday < 10 %}0{% endif %}{{ config.sleep_hour_saturday }}:{% if config.sleep_min_saturday < 10 %}0{% endif %}{{ config.sleep_min_saturday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-        <div class="form-group row">
-          <label for="wakeupTimeSunday" class="col-4 col-form-label">{% trans "Sunday - Wake up / Sleep" %}</label>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="wakeupTimeSunday" name="wakeup_time_sunday" type="text" class="form-control" value="{% if config.wakeup_hour_sunday < 10 %}0{% endif %}{{ config.wakeup_hour_sunday }}:{% if config.wakeup_min_sunday < 10 %}0{% endif %}{{ config.wakeup_min_sunday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>
-          <div class="col-4">
-            <div class="input-group clockpicker" data-autoclose="true">
-              <input id="sleepTimeSunday" name="sleep_time_sunday" type="text" class="form-control" value="{% if config.sleep_hour_sunday < 10 %}0{% endif %}{{ config.sleep_hour_sunday }}:{% if config.sleep_min_sunday < 10 %}0{% endif %}{{ config.sleep_min_sunday }}">
-              <span class="input-group-addon">
-                <span class="glyphicon glyphicon-time"></span>
-              </span>
-            </div>
-          </div>          
-        </div>
-      </div>      
-      <div class="form-group row">
-        <label for="timezoneSel" class="col-6 col-form-label">{% trans "Time zone" %}</label>
-        <div class="col-6">
-            <select name="timezone" id="timezoneSel">
-            {% for timezone in timezones %}
-            <option value="{{ timezone }}" {% if timezone == current_timezone %}selected{% endif %}>{{ timezone }}</option>
+
+          <div data-mode="days"{% if plan.mode != 'days' %} hidden{% endif %}>
+            {% for label, day, wake, sleep in plan.days %}
+              <div class="nab-day">
+                <span>{{ label }}</span>
+                <input type="time" name="{{ plan.prefix }}_wake_{{ day }}" value="{{ wake }}" aria-label="{% trans 'Réveil' %} {{ label }}">
+                <input type="time" name="{{ plan.prefix }}_sleep_{{ day }}" value="{{ sleep }}" aria-label="{% trans 'Coucher' %} {{ label }}">
+              </div>
             {% endfor %}
-            </select>
+            <p class="nab-hint">{% trans "Un coucher après minuit compte pour la veille (jusqu’à 3 h)." %}</p>
+          </div>
+
+          <div class="nab-sw-row is-small js-weekend-row"{% if plan.mode == 'days' %} hidden{% endif %}>
+            <div class="nab-sw-text">{% trans "Horaires différents le week-end" %}</div>
+            <button type="button" class="nab-switch js-weekend" role="switch" aria-checked="{% if plan.mode == 'weekend' %}true{% else %}false{% endif %}" aria-label="{% trans 'Horaires différents le week-end' %}"></button>
+          </div>
+          <div class="nab-sw-row is-small">
+            <div class="nab-sw-text">{% trans "Un horaire par jour" %}</div>
+            <button type="button" class="nab-switch js-perday" role="switch" aria-checked="{% if plan.mode == 'days' %}true{% else %}false{% endif %}" aria-label="{% trans 'Un horaire par jour' %}"></button>
+          </div>
+        </div>
+      {% endfor %}
+
+      <div class="nab-others">
+        <div class="nab-sw-row">
+          <div class="nab-sw-text">{% trans "Sonner les heures" %}</div>
+          <button type="button" class="nab-switch js-flag" role="switch" data-name="chime_hour" aria-checked="{% if config.chime_hour %}true{% else %}false{% endif %}" aria-label="{% trans 'Sonner les heures' %}"></button>
+          <input type="hidden" name="chime_hour" value="{% if config.chime_hour %}true{% else %}false{% endif %}">
+        </div>
+        <div class="nab-sw-row">
+          <div class="nab-sw-text">{% trans "Sons au réveil et au coucher" %}</div>
+          <button type="button" class="nab-switch js-flag" role="switch" data-name="play_wakeup_sleep_sounds" aria-checked="{% if config.play_wakeup_sleep_sounds %}true{% else %}false{% endif %}" aria-label="{% trans 'Sons au réveil et au coucher' %}"></button>
+          <input type="hidden" name="play_wakeup_sleep_sounds" value="{% if config.play_wakeup_sleep_sounds %}true{% else %}false{% endif %}">
+        </div>
+        <div class="nab-tz">
+          <label for="timezoneSel" class="nab-sw-sub">{% trans "Fuseau horaire" %}</label>
+          <select name="timezone" id="timezoneSel" class="form-control">
+            {% for timezone in timezones %}
+              <option value="{{ timezone }}" {% if timezone == current_timezone %}selected{% endif %}>{{ timezone }}</option>
+            {% endfor %}
+          </select>
         </div>
       </div>
-      <div class="form-group row">
-        <label for="playSoundsBtn" class="col-6 col-form-label">{% trans "Play wake up and sleep sound" %}</label>
-        <div class="col-6">
-          <button id="playSoundsBtn" type="button" class="btn btn-toggle{% if config.play_wakeup_sleep_sounds %} active{% endif %}" data-name="play_wakeup_sleep_sounds" data-toggle="button" aria-pressed="false" autocomplete="off"><div class="handle"></div></button>
-          <input name="play_wakeup_sleep_sounds" type="hidden" value="{% if config.play_wakeup_sleep_sounds %}true{% else %}false{% endif %}" />
-        </div>
-      </div>
-    </div>
-    <div class="card-footer">
-      <div class="row mb-2">
-        <div class="col-12">
-          <button type="submit" class="btn btn-primary disabled ml-2 float-right save-button">{% trans "Save" %}</button>
-          <button type="reset" class="btn btn-outline-primary disabled ml-2 float-right reset-button">{% trans "Reset" %}</button>
-        </div>
-      </div>
+
+      <button type="submit" class="btn btn-primary btn-block mt-3 js-save" disabled>{% trans "Enregistrer" %}</button>
+      <p class="nab-status js-status" aria-live="polite">{% if saved %}{% trans "Horaires enregistrés." %}{% endif %}</p>
     </div>
   </form>
+
   <script type="text/javascript">
   $(function() {
-    var form = $('#nabclockd-settings form');
-    var saveBtn = form.find('button.save-button');
-    var resetBtn = form.find('button.reset-button');
-    var url = form.attr('action');
-    form.find('button.btn-toggle').on('click', function() {
-      saveBtn.removeClass('disabled');
-      resetBtn.removeClass('disabled');
-    });
-    form.find("button[id='distinctTimesBtn']").on('click', function() {
-      var isBtnActive = (!(form.find("button[id='distinctTimesBtn']").hasClass('active')))
-      if (isBtnActive ) {
-        form.find("div[id='commonWakeUpTimes']").hide();
-        form.find("div[id='distinctWakeUpTimes']").show();
-      } else {
-        form.find("div[id='distinctWakeUpTimes']").hide();
-        form.find("div[id='commonWakeUpTimes']").show();
-      }
-    });
-    form.find('.clockpicker').clockpicker();
-    form.find('input').on('change', function() {
-      saveBtn.removeClass('disabled');
-      resetBtn.removeClass('disabled');
-    });
-    form.find('select').on('change', function() {
-      saveBtn.removeClass('disabled');
-      resetBtn.removeClass('disabled');
-    });
-    form.on('submit', function() {
-      form.find("input[name='chime_hour']").val(form.find("button[id='chimeHoursBtn']").hasClass('active'));
-      form.find("input[name='play_wakeup_sleep_sounds']").val(form.find("button[id='playSoundsBtn']").hasClass('active'));
-      form.find("input[name='settings_per_day']").val(form.find("button[id='distinctTimesBtn']").hasClass('active'));
-      var formdata = form.serialize();
-      $.ajax({
-       url: url,
-       method: "POST",
-       data: formdata,
-       success: function (data) {
-         $("#nabclockd-settings").replaceWith(data);
-       }
+    var card = $("#nabclockd-settings");
+    var form = card.find("form");
+    var url = form.attr("action");
+    var save = form.find(".js-save");
+    var useAlt = form.find(".js-use-alt");
+    var stateText = form.find(".js-schedule-state");
+    var status = form.find(".js-status");
+
+    function altName() {
+      return $.trim(form.find(".js-alt-name").val()) || "{{ alt_name|escapejs }}";
+    }
+
+    function changed() {
+      save.prop("disabled", false);
+      status.text("");
+    }
+
+    function showState() {
+      var alt = useAlt.attr("aria-checked") === "true";
+      form.find(".js-plan").each(function() {
+        $(this).toggleClass("is-active", ($(this).data("prefix") === "alt") === alt);
       });
+      form.find(".js-alt-name-mirror").text(altName());
+      stateText.text(alt
+        ? stateText.data("text-alt").replace("%s", altName())
+        : stateText.data("text-main"));
+    }
+
+    // The switch applies at once, without "Enregistrer".
+    useAlt.on("click", function() {
+      var next = useAlt.attr("aria-checked") !== "true";
+      useAlt.prop("disabled", true);
+      $.ajax({
+        url: useAlt.data("url"),
+        method: "POST",
+        data: {
+          use_alt_schedule: next ? "true" : "false",
+          csrfmiddlewaretoken: form.find("input[name='csrfmiddlewaretoken']").val()
+        },
+        dataType: "json"
+      })
+        .done(function() {
+          useAlt.attr("aria-checked", next ? "true" : "false");
+          showState();
+          status.removeClass("is-warning");
+          document.dispatchEvent(new CustomEvent("nabclockd:schedule"));
+        })
+        .fail(function() {
+          status.addClass("is-warning").text("{% trans 'Le changement n’a pas été enregistré.' %}");
+        })
+        .always(function() {
+          useAlt.prop("disabled", false);
+        });
+    });
+
+    form.find(".js-flag").on("click", function() {
+      var button = $(this);
+      var on = button.attr("aria-checked") !== "true";
+      button.attr("aria-checked", on ? "true" : "false");
+      form.find("input[name='" + button.data("name") + "']").val(on ? "true" : "false");
+      changed();
+    });
+
+    // "Horaires différents le week-end" and "Un horaire par jour" choose how
+    // the times are written; the times already typed are carried over.
+    var WEEKEND_MORNINGS = ["saturday", "sunday"];
+    var WEEKEND_NIGHTS = ["friday", "saturday"];
+
+    function field(plan, name) {
+      return plan.find("input[name='" + plan.data("prefix") + "_" + name + "']");
+    }
+
+    function setMode(plan, mode) {
+      var before = plan.find(".js-mode").val();
+      if (mode === before) {
+        return;
+      }
+      if (before === "all" && mode === "weekend") {
+        field(plan, "week_wake").val(field(plan, "wake").val());
+        field(plan, "week_sleep").val(field(plan, "sleep").val());
+      } else if (before === "weekend" && mode === "all") {
+        field(plan, "wake").val(field(plan, "week_wake").val());
+        field(plan, "sleep").val(field(plan, "week_sleep").val());
+      } else if (mode === "days") {
+        ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].forEach(function(day) {
+          var wake = before === "all" ? field(plan, "wake").val()
+            : field(plan, WEEKEND_MORNINGS.indexOf(day) >= 0 ? "weekend_wake" : "week_wake").val();
+          var sleep = before === "all" ? field(plan, "sleep").val()
+            : field(plan, WEEKEND_NIGHTS.indexOf(day) >= 0 ? "weekend_sleep" : "week_sleep").val();
+          field(plan, "wake_" + day).val(wake);
+          field(plan, "sleep_" + day).val(sleep);
+        });
+      }
+      plan.find(".js-mode").val(mode);
+      plan.find("[data-mode]").each(function() {
+        this.hidden = $(this).data("mode") !== mode;
+      });
+      plan.find(".js-weekend-row").prop("hidden", mode === "days");
+      plan.find(".js-weekend").attr("aria-checked", mode === "weekend" ? "true" : "false");
+      plan.find(".js-perday").attr("aria-checked", mode === "days" ? "true" : "false");
+      changed();
+    }
+
+    form.find(".js-weekend").on("click", function() {
+      var plan = $(this).closest(".js-plan");
+      setMode(plan, $(this).attr("aria-checked") === "true" ? "all" : "weekend");
+    });
+
+    form.find(".js-perday").on("click", function() {
+      var plan = $(this).closest(".js-plan");
+      var on = $(this).attr("aria-checked") !== "true";
+      setMode(plan, on ? "days" : (plan.find(".js-weekend").attr("aria-checked") === "true" ? "weekend" : "all"));
+    });
+
+    form.find("input[type='time'], .js-alt-name, select").on("input change", function() {
+      changed();
+      showState();
+    });
+
+    form.on("submit", function() {
+      // Only the times of the selected way of writing them are sent.
+      var data = form.find("input, select").filter(function() {
+        return !$(this).closest("[data-mode]").prop("hidden");
+      }).serialize();
+      save.prop("disabled", true);
+      $.ajax({ url: url, method: "POST", data: data })
+        .done(function(html) {
+          card.replaceWith(html);
+          document.dispatchEvent(new CustomEvent("nabclockd:schedule"));
+        })
+        .fail(function() {
+          save.prop("disabled", false);
+          status.addClass("is-warning").text("{% trans 'Les horaires n’ont pas été enregistrés.' %}");
+        });
       return false;
     });
-    resetBtn.on("click", function() {
-      $.get(url, function(data) {
-        $("#nabclockd-settings").replaceWith(data);
-      });
-    });
+
+    showState();
   });
   </script>
 </div>

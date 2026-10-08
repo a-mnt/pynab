@@ -240,6 +240,11 @@ class Config(singleton_model.SingletonModel):
     play_wakeup_sleep_sounds = models.BooleanField(default=True)
     settings_per_day = models.BooleanField(default=False)
     sleep_wakeup_override = models.BooleanField(default=None, null=True)
+    # Second set of wake up / sleep times (see schedule.py).
+    use_alt_schedule = models.BooleanField(default=False)
+    alt_schedule = models.TextField(default="", blank=True)
+    # How the usual times are written on the page: "all", "weekend", "days".
+    main_mode = models.CharField(max_length=8, default="", blank=True)
 
     class Meta:
         app_label = "nabclockd"

@@ -92,7 +92,7 @@ def parse_ears(gestalt):
 SERVICE_LABELS = {
     "nabradio": (_("Radio"), _("Radios web et lecture.")),
     "nabmastodond": (_("Notifications"), _("Mastodon et messages.")),
-    "nabclockd": (_("Agenda"), _("Horloge, réveil et coucher.")),
+    "nabclockd": (_("Réveil et coucher"), _("Horaires du lapin et carillon.")),
     "nabtaichid": (_("Oreilles"), _("Tai chi et mouvements d’oreilles.")),
     "nabiftttd": (_("Automatisations"), _("Actions IFTTT.")),
     "nabweatherd": (_("Météo"), _("Prévisions et animations.")),
@@ -206,6 +206,16 @@ class BaseView(View, metaclass=abc.ABCMeta):
 
 
 class NabWebView(BaseView):
+    @staticmethod
+    def get_schedule():
+        """Set of wake up / sleep times followed (see nabclockd)."""
+        try:
+            from nabclockd.views import schedule_summary
+
+            return schedule_summary()
+        except Exception:
+            return None
+
     def template_name(self):
         return "nabweb/index.html"
 
@@ -223,6 +233,7 @@ class NabWebView(BaseView):
         ]
         context["ssh"] = get_ssh_state()
         context["alerts"] = self.get_alerts()
+        context["schedule"] = self.get_schedule()
         return context
 
     def get_rabbit_state(self, gestalt):
