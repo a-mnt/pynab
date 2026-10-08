@@ -15,6 +15,9 @@ test=0
 
 # upgrade : this script is invoked from upgrade.sh, typically from the button in the web interface.
 upgrade=0
+upgrade_from=""
+upgrade_drivers=""
+drivers_given=0
 
 if [ "${1:-}" == "--makerfaire2018" ]; then
   makerfaire2018=1
@@ -30,6 +33,14 @@ elif [ "${1:-}" == "test" ]; then
   test=1
 elif [ "${1:-}" == "--upgrade" ]; then
   upgrade=1
+  # --from=COMMIT: version before the update; only what changed since is
+  # redone. --drivers=LIST: drivers to update, as checked by the web site.
+  for arg in "${@:2}"; do
+    case "${arg}" in
+      --from=*) upgrade_from="${arg#--from=}" ;;
+      --drivers=*) upgrade_drivers="${arg#--drivers=}"; drivers_given=1 ;;
+    esac
+  done
   # auto-detect Maker Faire card here.
   if [ `sudo aplay -L | grep -c "hifiberry"` -gt 0 ]; then
     makerfaire2018=1
@@ -54,6 +65,75 @@ owner=`stat -c '%U' ${root_dir}`
 uid=`stat -c '%u' ${root_dir}`
 gid=`stat -c '%g' ${root_dir}`
 inst_dir=$(dirname ${root_dir})
+
+# --- Light upgrade: redo only what the new version changes ---------------
+# full=1: redo everything (installation, or previous version unknown).
+full=1
+changed_files=""
+if [ $upgrade -eq 1 -a -n "${upgrade_from}" ]; then
+  if git -C ${root_dir} cat-file -e "${upgrade_from}^{commit}" 2>/dev/null; then
+    full=0
+    changed_files=`git -C ${root_dir} diff --name-only "${upgrade_from}" HEAD`
+  fi
+fi
+
+# changed REGEX: does the update change a file matching REGEX?
+changed() {
+  [ $full -eq 1 ] && return 0
+  grep -qE "$1" <<< "${changed_files}"
+}
+
+# driver_wanted NAME: should this driver be updated?
+driver_wanted() {
+  [ ${drivers_given} -eq 0 ] && return 0
+  [[ ",${upgrade_drivers}," == *",$1,"* ]]
+}
+
+# skip_step "Message" N: tell the web site that step N was not needed.
+skip_step() {
+  echo "$1 - $2/14 (skipped)" > /tmp/pynab.upgrade
+  echo "$2" >> /tmp/pynab.upgrade.skipped
+}
+
+# Services of the update. All of them when shared code or libraries change,
+# otherwise only those whose directory changed.
+restart_all=1
+restart_services=""
+if [ $upgrade -eq 1 -a $full -eq 0 ]; then
+  if ! changed '^(nabd|nabcommon)/|^requirements\.txt$|(^|/)nlu/' && [ "${drivers_given}" -eq 1 -a -z "${upgrade_drivers}" ]; then
+    restart_all=0
+    for service_file in ${root_dir}/*/*.service ; do
+      name=`basename ${service_file}`
+      dir=`basename $(dirname ${service_file})`
+      # The web site is restarted at the end; nabweb-boot only runs at boot.
+      case "${name}" in nabd.service|nabweb.service|nabweb-boot.service) continue ;; esac
+      if changed "^${dir}/"; then
+        restart_services="${restart_services} ${name}"
+      fi
+    done
+  fi
+fi
+
+if [ $upgrade -eq 1 ]; then
+  if [ $restart_all -eq 1 ]; then
+    echo "Stopping services - 1/14" > /tmp/pynab.upgrade
+    for service_file in ${root_dir}/*/*.service ; do
+      name=`basename ${service_file}`
+      if [ "${name}" != "nabd.service" -a "${name}" != "nabweb.service" ]; then
+        sudo systemctl stop ${name} || true
+      fi
+    done
+    sudo systemctl stop nabd.socket || true
+    sudo systemctl stop nabd.service || true
+  elif [ -n "${restart_services}" ]; then
+    echo "Stopping services - 1/14" > /tmp/pynab.upgrade
+    for name in ${restart_services}; do
+      sudo systemctl stop ${name} || true
+    done
+  else
+    skip_step "Stopping services" 1
+  fi
+fi
 
 if [ $ci_chroot -eq 0 -a $makerfaire2018 -eq 0 -a `sudo aplay -L | grep -c "tagtagtagsound"` -eq 0 ]; then
   if [ `sudo aplay -L | grep -c "hifiberry"` -gt 0 ]; then
@@ -84,7 +164,9 @@ build_and_install_driver() {
   done
 }
 
-if [ $upgrade -eq 1 -a $makerfaire2018 -eq 0 -a -d ${inst_dir}/wm8960 ]; then
+if [ $upgrade -eq 1 ] && ! driver_wanted sound_driver; then
+  skip_step "Updating sound driver" 2
+elif [ $upgrade -eq 1 -a $makerfaire2018 -eq 0 -a -d ${inst_dir}/wm8960 ]; then
   echo "Updating sound driver - 2/14" > /tmp/pynab.upgrade
   cd ${inst_dir}/wm8960
   sudo chown -R ${uid}:${gid} .
@@ -95,7 +177,9 @@ if [ $upgrade -eq 1 -a $makerfaire2018 -eq 0 -a -d ${inst_dir}/wm8960 ]; then
   fi
 fi
 
-if [ $upgrade -eq 1 ]; then
+if [ $upgrade -eq 1 ] && [ -d ${inst_dir}/tagtagtag-ears ] && ! driver_wanted ears_driver; then
+  skip_step "Updating ears driver" 3
+elif [ $upgrade -eq 1 ]; then
   echo "Updating ears driver - 3/14" > /tmp/pynab.upgrade
   if [ -d ${inst_dir}/tagtagtag-ears ]; then
     cd ${inst_dir}/tagtagtag-ears
@@ -120,9 +204,13 @@ else
   fi
 fi
 
-if [ $upgrade -eq 1 ]; then
+if [ $upgrade -eq 1 ] && [ -d ${inst_dir}/cr14 -a -d ${inst_dir}/st25r391x ] && ! driver_wanted rfid_driver && ! driver_wanted nfc_driver; then
+  skip_step "Updating RFID drivers" 4
+elif [ $upgrade -eq 1 ]; then
   echo "Updating RFID drivers - 4/14" > /tmp/pynab.upgrade
-  if [ -d ${inst_dir}/cr14 ]; then
+  if [ -d ${inst_dir}/cr14 ] && ! driver_wanted rfid_driver; then
+    echo "RFID driver up to date"
+  elif [ -d ${inst_dir}/cr14 ]; then
     cd ${inst_dir}/cr14
     sudo chown -R ${uid}:${gid} .
     pull=`git pull`
@@ -138,7 +226,9 @@ if [ $upgrade -eq 1 ]; then
     build_and_install_driver cr14
     sudo touch /tmp/pynab.upgrade.reboot
   fi
-  if [ -d ${inst_dir}/st25r391x ]; then
+  if [ -d ${inst_dir}/st25r391x ] && ! driver_wanted nfc_driver; then
+    echo "NFC driver up to date"
+  elif [ -d ${inst_dir}/st25r391x ]; then
     cd ${inst_dir}/st25r391x
     sudo chown -R ${uid}:${gid} .
     pull=`git pull`
@@ -165,7 +255,9 @@ else
   fi
 fi
 
-if [ $upgrade -eq 1 ]; then
+if [ $upgrade -eq 1 ] && ! driver_wanted nabblockly; then
+  skip_step "Updating NabBlockly" 5
+elif [ $upgrade -eq 1 ]; then
   echo "Updating NabBlockly - 5/14" > /tmp/pynab.upgrade
   if [ -d ${root_dir}/nabblockly ]; then
     cd ${root_dir}/nabblockly
@@ -251,11 +343,19 @@ if [[ -f "${venv_cfg}" && "$(grep -c version\ =\ ${py_ver} ${venv_cfg})" -eq 0 ]
    # Installed virtual env does not match needed version: remove it
    sudo rm -rf "venv"
 fi
+venv_created=0
 if [ ! -d "venv" ]; then
   echo "Creating Python ${py_ver} virtual environment"
   ${python} -m venv venv
+  venv_created=1
 fi
 
+requirements_changed=0
+if [ $venv_created -eq 1 ] || changed '^requirements\.txt$'; then
+  requirements_changed=1
+fi
+
+if [ $requirements_changed -eq 1 ]; then
 echo "Installing PyPi requirements"
 if [ $upgrade -eq 1 ]; then
   echo "Updating Python requirements - 7/14" > /tmp/pynab.upgrade
@@ -263,8 +363,17 @@ fi
 # Start with wheel which is required to compile some of the other requirements
 venv/bin/pip install --no-cache-dir wheel
 venv/bin/pip install --no-cache-dir -r requirements.txt
+else
+  skip_step "Updating Python requirements" 7
+fi
 
-if [ $makerfaire2018 -eq 0 ]; then
+nlu_needed=1
+if [ $requirements_changed -eq 0 -a -d nabd/nlu/engine_en -a -d nabd/nlu/engine_fr ] && ! changed '(^|/)nlu/'; then
+  nlu_needed=0
+fi
+if [ $upgrade -eq 1 -a $nlu_needed -eq 0 ]; then
+  skip_step "Updating NLU models" 8
+elif [ $makerfaire2018 -eq 0 ]; then
   if [ $upgrade -eq 1 ]; then
     echo "Updating NLU models - 8/14" > /tmp/pynab.upgrade
   fi
@@ -335,11 +444,13 @@ if [ $upgrade -eq 0 ]; then
     }
   fi
 else
-  echo "Restarting Nginx"
-  echo "Restarting Nginx - 9/14" > /tmp/pynab.upgrade
-  if [ -e '/etc/nginx/sites-enabled/pynab' ]; then
+  if [ -e '/etc/nginx/sites-enabled/pynab' ] && ! diff -q '/etc/nginx/sites-enabled/pynab' /tmp/nginx-site.conf >/dev/null; then
+    echo "Restarting Nginx"
+    echo "Restarting Nginx - 9/14" > /tmp/pynab.upgrade
     sudo mv /tmp/nginx-site.conf /etc/nginx/sites-enabled/pynab
     sudo systemctl restart nginx
+  else
+    skip_step "Restarting Nginx" 9
   fi
 fi
 sudo rm -f /tmp/nginx-site.conf
@@ -351,17 +462,37 @@ psql -U pynab -c '' 2>/dev/null || {
   sudo -u postgres psql -U postgres -c "ALTER ROLE pynab CREATEDB"
 }
 
-echo "Updating data models"
-if [ $upgrade -eq 1 ]; then
-  echo "Updating data models - 10/14" > /tmp/pynab.upgrade
+if [ $upgrade -eq 1 ] && ! changed '/migrations/'; then
+  skip_step "Updating data models" 10
+else
+  echo "Updating data models"
+  if [ $upgrade -eq 1 ]; then
+    echo "Updating data models - 10/14" > /tmp/pynab.upgrade
+  fi
+  venv/bin/python manage.py migrate
 fi
-venv/bin/python manage.py migrate
 
 all_locales="-l fr_FR -l de_DE -l en_US -l en_GB -l it_IT -l es_ES -l ja_jp -l pt_BR -l de -l en -l es -l fr -l it -l ja -l pt"
 
 echo "Updating localization messages"
 if [ $upgrade -eq 0 ]; then
   venv/bin/django-admin compilemessages ${all_locales}
+elif [ -x "$(command -v msgfmt)" ]; then
+  compiled=0
+  for po in nab*/locale/*/LC_MESSAGES/*.po; do
+    [ -e "${po}" ] || continue
+    mo="${po%.po}.mo"
+    if [ ! -e "${mo}" -o "${po}" -nt "${mo}" ]; then
+      if [ $compiled -eq 0 ]; then
+        echo "Updating localization messages - 11/14" > /tmp/pynab.upgrade
+      fi
+      msgfmt -o "${mo}" "${po}" || echo "Could not compile ${po}"
+      compiled=$((compiled + 1))
+    fi
+  done
+  if [ $compiled -eq 0 ]; then
+    skip_step "Updating localization messages" 11
+  fi
 else
   echo "Updating localization messages - 11/14" > /tmp/pynab.upgrade
   for module in nab*/locale; do
@@ -390,13 +521,29 @@ echo "Installing service files"
 if [ $upgrade -eq 1 ]; then
   echo "Installing service files - 12/14" > /tmp/pynab.upgrade
 fi
+services_installed=0
 for service_file in nabd/nabd.socket */*.service ; do
   name=`basename ${service_file}`
   sudo sed -e "s|/opt/pynab|${root_dir}|g" -e "s|/home/pi/pynab|${root_dir}|g" < ${service_file} > /tmp/${name}
+  if cmp -s /tmp/${name} /lib/systemd/system/${name} && systemctl is-enabled --quiet ${name} 2>/dev/null; then
+    rm -f /tmp/${name}
+    continue
+  fi
   sudo mv /tmp/${name} /lib/systemd/system/${name}
   sudo chown root /lib/systemd/system/${name}
   sudo systemctl enable ${name}
+  services_installed=$((services_installed + 1))
+  # A new or changed service is (re)started with the others.
+  dir=`dirname ${service_file}`
+  if [ "${name}" != "nabd.service" -a "${name}" != "nabweb.service" -a "${name}" != "nabd.socket" ]; then
+    case " ${restart_services} " in *" ${name} "*) ;; *) restart_services="${restart_services} ${name}" ;; esac
+  fi
 done
+if [ $services_installed -gt 0 ]; then
+  sudo systemctl daemon-reload
+elif [ $upgrade -eq 1 ]; then
+  skip_step "Installing service files" 12
+fi
 sudo sed -e "s|/opt/pynab|${root_dir}|g" < nabboot/nabboot.py > /tmp/nabboot.py
 sudo mv /tmp/nabboot.py /lib/systemd/system-shutdown/nabboot.py
 sudo chown root /lib/systemd/system-shutdown/nabboot.py
@@ -469,20 +616,33 @@ else
       echo "Restarting services - 13/14" > /tmp/pynab.upgrade
     fi
     sudo systemctl restart logrotate.service || true
-    sudo systemctl start nabd.socket
-    sudo systemctl start nabd.service
+    if [ $restart_all -eq 1 ]; then
+      sudo systemctl start nabd.socket
+      sudo systemctl start nabd.service
 
-    # start services
-    for service_file in */*.service ; do
-      name=`basename ${service_file}`
-      if [ "${name}" != "nabd.service" -a "${name}" != "nabweb.service" ]; then
-        sudo systemctl start ${name}
-      fi
-    done
+      # start services
+      for service_file in */*.service ; do
+        name=`basename ${service_file}`
+        if [ "${name}" != "nabd.service" -a "${name}" != "nabweb.service" ]; then
+          sudo systemctl start ${name}
+        fi
+      done
+    elif [ -n "${restart_services}" ]; then
+      # Only the services of the changed parts (the others kept running).
+      for name in ${restart_services}; do
+        sudo systemctl restart ${name}
+      done
+    else
+      skip_step "Restarting services" 13
+    fi
 
     if [ $upgrade -eq 1 ]; then
-      echo "Restarting web site - 14/14" > /tmp/pynab.upgrade
-      sudo systemctl restart nabweb.service
+      if [ $restart_all -eq 1 -o -n "${changed_files}" ]; then
+        echo "Restarting web site - 14/14" > /tmp/pynab.upgrade
+        sudo systemctl restart nabweb.service
+      else
+        skip_step "Restarting web site" 14
+      fi
     else
       sudo systemctl start nabweb.service
     fi

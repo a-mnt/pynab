@@ -1,3 +1,4 @@
+import datetime
 import asyncio
 import fcntl
 import json
@@ -226,7 +227,7 @@ class TestUpgradeProgress(TestCase):
         os.remove(self.path)
         self.assertIsNone(views.NabWebUpgradeNowView.current_step())
         response = Client().get("/upgrade/now")
-        self.assertEqual(response.json(), {"status": "done"})
+        self.assertEqual(response.json(), {"status": "done", "skipped": []})
 
     def test_file_not_locked_means_no_upgrade(self):
         with open(self.path, "w") as upgrade_f:
@@ -245,11 +246,11 @@ class TestUpgradeProgress(TestCase):
             response = Client().get("/upgrade/now")
             self.assertEqual(
                 response.json(),
-                {"status": "ok", "message": "Updating data models - 10/14"},
+                {"status": "ok", "message": "Updating data models - 10/14", "skipped": []},
             )
         # Lock released: the upgrade is over.
         self.assertEqual(
-            Client().get("/upgrade/now").json(), {"status": "done"}
+            Client().get("/upgrade/now").json(), {"status": "done", "skipped": []}
         )
 
     def test_page_lists_the_steps(self):
@@ -681,3 +682,58 @@ class TestShutdownView(TestNabdClientBase):
         json_response = json.loads(response.content.decode("utf8"))
         self.assertTrue("status" in json_response)
         self.assertEqual(json_response["status"], "ok")
+
+
+class TestLightUpgrade(TestCase):
+    """The web site tells upgrade.sh which drivers have a new version."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def remember(self, repository, **info):
+        info = dict({"status": "ok", "name": repository, "info_date": datetime.datetime.now()}, **info)
+        cache.set(f"git/info/{repository}", info, 60)
+
+    def test_drivers_to_update(self):
+        for driver in views.GitInfo.DRIVERS:
+            self.remember(driver, commits_count=0)
+        self.remember("ears_driver", commits_count=2)
+        self.assertEqual(views.GitInfo.drivers_to_update(), ["ears_driver"])
+        # Never checked: included, to be safe.
+        cache.delete("git/info/nabblockly")
+        self.assertEqual(views.GitInfo.drivers_to_update(), ["ears_driver", "nabblockly"])
+
+    def test_updatable_when_only_a_driver_changed(self):
+        for driver in views.GitInfo.DRIVERS:
+            self.remember(driver, commits_count=0)
+        pynab = {"status": "ok", "commits_count": 0, "local_commits_count": 0}
+        self.assertFalse(views.GitInfo.is_updatable(pynab))
+        self.remember("sound_driver", commits_count=1)
+        self.assertTrue(views.GitInfo.is_updatable(pynab))
+        pynab["local_commits_count"] = 1
+        self.assertFalse(views.GitInfo.is_updatable(pynab))
+
+    def test_upgrade_passes_the_drivers(self):
+        for driver in views.GitInfo.DRIVERS:
+            self.remember(driver, commits_count=0)
+        self.remember("nfc_driver", commits_count=3)
+        with mock.patch.object(views.GitInfo, "get_root_dir", return_value="/opt/pynab"), \
+                mock.patch("os.stat") as stat, \
+                mock.patch.object(views, "_run_command", return_value=(0, "OK", "")), \
+                mock.patch("builtins.open", mock.mock_open()), \
+                mock.patch("subprocess.Popen") as popen:
+            stat.return_value.st_uid = 1000
+            response = Client().post("/upgrade/now")
+        self.assertEqual(response.json()["status"], "ok")
+        command = popen.call_args[0][0]
+        self.assertEqual(command[-2:], ["/opt/pynab/upgrade.sh", "--drivers=nfc_driver"])
+
+    def test_skipped_steps_reported(self):
+        with tempfile.NamedTemporaryFile("w", delete=False) as skipped:
+            skipped.write("2\n5\n5\n11\n")
+        with mock.patch.object(views.NabWebUpgradeNowView, "SKIPPED_FILE", skipped.name), \
+                mock.patch.object(views.NabWebUpgradeNowView, "current_step", return_value="Updating data models - 10/14"):
+            data = Client().get("/upgrade/now").json()
+        os.unlink(skipped.name)
+        self.assertEqual(data, {"status": "ok", "message": "Updating data models - 10/14", "skipped": [2, 5, 11]})

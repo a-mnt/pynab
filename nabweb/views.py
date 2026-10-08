@@ -717,6 +717,37 @@ class GitInfo:
         "nabblockly": "NabBlockly",
     }
 
+    # Updated by the upgrade only if the web site found a new version.
+    DRIVERS = ("sound_driver", "ears_driver", "rfid_driver", "nfc_driver", "nabblockly")
+
+    @staticmethod
+    def drivers_to_update():
+        """
+        Drivers with a new version, from the last check ("Check now").
+        A driver never checked is included, to be safe.
+        """
+        drivers = []
+        for repository in GitInfo.DRIVERS:
+            info = GitInfo.get_repository_info(repository, cached=True)
+            if info is None or (
+                info.get("status") == "ok" and info.get("commits_count", 0) > 0
+            ):
+                drivers.append(repository)
+        return drivers
+
+    @staticmethod
+    def is_updatable(pynab_info):
+        """Something to update, and no local Pynab commits that a pull would mix."""
+        if pynab_info is None or pynab_info.get("local_commits_count", 0) != 0:
+            return False
+        if pynab_info.get("commits_count", 0) > 0:
+            return True
+        for repository in GitInfo.DRIVERS:
+            info = GitInfo.get_repository_info(repository, cached=True)
+            if info is not None and info.get("commits_count", 0) > 0:
+                return True
+        return False
+
     @staticmethod
     def _git(repo_dir, *args, sudo_uid=None):
         """
@@ -874,12 +905,7 @@ class NabWebUpgradeView(BaseView):
                 last_check = info["info_date"]
             else:
                 last_check = min(last_check, info["info_date"])
-        updatable = (
-            "commits_count" in pynab_info
-            and pynab_info["commits_count"] > 0
-            and "local_commits_count" in pynab_info
-            and pynab_info["local_commits_count"] == 0
-        )
+        updatable = GitInfo.is_updatable(pynab_info)
         context["partial"] = partial
         context["updatable"] = updatable
         context["last_check"] = last_check
@@ -891,13 +917,7 @@ class NabWebUpgradeRepositoryInfoView(View):
         repository = kwargs.get("repository")
         repo_info = GitInfo.get_repository_info(repository)
         pynab_info = GitInfo.get_repository_info("pynab", cached=True)
-        updatable = (
-            pynab_info is not None
-            and "commits_count" in pynab_info
-            and pynab_info["commits_count"] > 0
-            and "local_commits_count" in pynab_info
-            and pynab_info["local_commits_count"] == 0
-        )
+        updatable = GitInfo.is_updatable(pynab_info)
         template_name = "nabweb/upgrade/_repository.html"
         context = {"repo": repo_info, "updatable": updatable}
         return render(request, template_name, context=context)
@@ -941,11 +961,27 @@ class NabWebUpgradeNowView(View):
             pass
         return None
 
+    # Steps found useless by install.sh, one number per line.
+    SKIPPED_FILE = "/tmp/pynab.upgrade.skipped"
+
+    @classmethod
+    def skipped_steps(cls):
+        try:
+            with open(cls.SKIPPED_FILE) as skipped_f:
+                return sorted(
+                    {int(line) for line in skipped_f if line.strip().isdigit()}
+                )
+        except OSError:
+            return []
+
     def get(self, request, *args, **kwargs):
         step = self.current_step()
+        skipped = self.skipped_steps()
         if step is None:
-            return JsonResponse({"status": "done"})
-        return JsonResponse({"status": "ok", "message": step})
+            return JsonResponse({"status": "done", "skipped": skipped})
+        return JsonResponse(
+            {"status": "ok", "message": step, "skipped": skipped}
+        )
 
     def post(self, request, *args, **kwargs):
         root_dir = GitInfo.get_root_dir()
@@ -992,6 +1028,8 @@ class NabWebUpgradeNowView(View):
                 "/tmp/pynab.upgrade",
                 "bash",
                 f"{root_dir}/upgrade.sh",
+                # Only the drivers with a new version are updated.
+                "--drivers=" + ",".join(GitInfo.drivers_to_update()),
             ]
             subprocess.Popen(
                 command,
