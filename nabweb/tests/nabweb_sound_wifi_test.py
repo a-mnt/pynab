@@ -208,6 +208,11 @@ LIST = (
 
 
 class TestWifi(TestCase):
+    def setUp(self):
+        patch = mock.patch.object(wifi.shutil, "which", side_effect=lambda name: "/usr/bin/nmcli" if name == "nmcli" else None)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_split_terse(self):
         self.assertEqual(wifi.split_terse("a\\:b:c\\\\:d"), ["a:b", "c\\", "d"])
 
@@ -260,7 +265,7 @@ class TestWifi(TestCase):
         not_running = FakeNmcli([(("-t",), (8, "", "Error: NetworkManager is not running."))])
         with mock.patch.object(wifi, "_nmcli", not_running):
             current = wifi.status()
-        self.assertEqual((current["managed"], current["state"], current["connected"]), (False, "no-networkmanager", False))
+        self.assertEqual((current["managed"], current["state"], current["connected"]), (False, "no-wifi-manager", False))
         unmanaged = FakeNmcli([(("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "wlan0:wifi:unmanaged:--\n", ""))])
         with mock.patch.object(wifi, "_nmcli", unmanaged):
             self.assertFalse(wifi.status()["managed"])
@@ -365,3 +370,197 @@ class TestWifiView(TestCase):
         with mock.patch.object(wifi, "available", return_value=True), mock.patch.object(wifi, "connect", return_value=False):
             data = Client().post("/settings/wifi", {"action": "connect", "ssid": "Voisin", "password": ""}).json()
         self.assertEqual(data, {"status": "busy"})
+
+
+SCAN = (
+    "bssid / frequency / signal level / flags / ssid\n"
+    "aa:aa:aa:aa:aa:01\t2437\t-58\t[WPA2-PSK-CCMP][ESS]\tMaison\n"
+    "aa:aa:aa:aa:aa:02\t5180\t-50\t[WPA2-PSK-CCMP][ESS]\tVoisin\n"
+    "aa:aa:aa:aa:aa:03\t2412\t-80\t[WPA2-PSK-CCMP][ESS]\tVoisin\n"
+    "aa:aa:aa:aa:aa:04\t2462\t-70\t[ESS]\tCaf\\xc3\\xa9 \\\"libre\\\"\n"
+    "aa:aa:aa:aa:aa:05\t2462\t-72\t[WPA2-SAE-CCMP][ESS]\tNeuf\n"
+    "aa:aa:aa:aa:aa:06\t2462\t-60\t[WPA2-EAP-CCMP][ESS]\tBureau\n"
+    "aa:aa:aa:aa:aa:07\t2462\t-40\t[WPA2-PSK-CCMP][ESS]\t\\x00\\x00\n"
+)
+
+
+class FakeWpa:
+    """A small wpa_supplicant: saved networks, the one in use, a scan."""
+
+    def __init__(self, passwords, joinable=True):
+        self.networks = {"0": {"ssid": "Maison", "psk": "x", "enabled": True}}
+        self.current = "0"
+        self.passwords = passwords  # ssid -> pbkdf2 psk expected
+        self.joinable = joinable
+        self.calls = []
+        self.next_id = 1
+        self.saved = False
+        self.trying = None
+        self.polls = 0
+
+    def __call__(self, *args, timeout=10):
+        self.calls.append(args)
+        cmd = args[0]
+        if cmd == "ping":
+            return 0, "PONG\n"
+        if cmd == "status":
+            if self.trying is not None:
+                self.polls += 1
+                net = self.networks[self.trying]
+                ok = self.passwords.get(net["ssid"]) == net.get("psk")
+                if ok and self.polls >= 2:
+                    self.current, self.trying = self.trying, None
+                else:
+                    return 0, "wpa_state=4WAY_HANDSHAKE\nssid=%s\n" % net["ssid"] if net["ssid"] in self.passwords else "wpa_state=SCANNING\n"
+            if self.current is None:
+                return 0, "wpa_state=SCANNING\n"
+            net = self.networks[self.current]
+            return 0, "bssid=aa\nfreq=2437\nssid=%s\nid=%s\nmode=station\nwpa_state=COMPLETED\nip_address=192.168.1.42\n" % (net["ssid"], self.current)
+        if cmd == "signal_poll":
+            return 0, "RSSI=-58\nLINKSPEED=72\n"
+        if cmd == "scan":
+            return 0, "OK\n"
+        if cmd == "scan_results":
+            return 0, SCAN
+        if cmd == "list_networks":
+            lines = ["network id / ssid / bssid / flags"]
+            for nid, net in self.networks.items():
+                flags = "[CURRENT]" if nid == self.current else ("" if net["enabled"] else "[DISABLED]")
+                lines.append(f"{nid}\t{net['ssid']}\tany\t{flags}")
+            return 0, "\n".join(lines) + "\n"
+        if cmd == "add_network":
+            nid = str(self.next_id)
+            self.next_id += 1
+            self.networks[nid] = {"ssid": None, "enabled": False}
+            return 0, nid + "\n"
+        if cmd == "set_network":
+            nid, key, value = args[1:]
+            if key == "ssid":
+                value = bytes.fromhex(value).decode("utf8")
+            self.networks[nid][key] = value
+            return 0, "OK\n"
+        if cmd == "select_network":
+            for nid in self.networks:
+                self.networks[nid]["enabled"] = nid == args[1]
+            if self.networks[args[1]].get("ssid") == "Maison":
+                self.current, self.trying = args[1], None
+            else:
+                self.current, self.trying, self.polls = None, args[1], 0
+            return 0, "OK\n"
+        if cmd == "enable_network":
+            for net in self.networks.values():
+                net["enabled"] = True
+            return 0, "OK\n"
+        if cmd == "remove_network":
+            self.networks.pop(args[1], None)
+            if self.trying == args[1]:
+                self.trying = None
+            return 0, "OK\n"
+        if cmd == "save_config":
+            self.saved = True
+            return 0, "OK\n"
+        return 1, "FAIL\n"
+
+
+def psk(password, ssid):
+    import hashlib
+
+    return hashlib.pbkdf2_hmac("sha1", password.encode(), ssid.encode(), 4096, 32).hex()
+
+
+class FakeClock:
+    """Seconds pass instantly."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class TestWifiWpa(TestCase):
+    """Rabbit without NetworkManager: wpa_supplicant and dhcpcd."""
+
+    def setUp(self):
+        self.fake = FakeWpa({"Voisin": psk("voisin1234", "Voisin")})
+        patches = [
+            mock.patch.object(wifi.shutil, "which", side_effect=lambda name: "/sbin/wpa_cli" if name == "wpa_cli" else None),
+            mock.patch.object(wifi, "_wpa", self.fake),
+            mock.patch.object(wifi, "_ip_address", return_value="192.168.1.57"),
+            mock.patch.object(wifi, "time", FakeClock()),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_decode_ssid(self):
+        self.assertEqual(wifi.decode_wpa_ssid('Caf\\xc3\\xa9 \\"libre\\" \\\\o/'), 'Café "libre" \\o/')
+
+    def test_status(self):
+        self.assertEqual(
+            wifi.status(),
+            {"connected": True, "ssid": "Maison", "bars": 3, "address": "192.168.1.42", "hotspot": False, "managed": True},
+        )
+
+    def test_scan(self):
+        networks = wifi.scan()
+        self.assertEqual(
+            [(n["ssid"], n["bars"], n["security"], n["current"]) for n in networks],
+            [("Maison", 3, "WPA2", True), ("Voisin", 4, "WPA2", False), ("Bureau", 3, "WPA2-Enterprise", False),
+             ('Café "libre"', 2, "", False), ("Neuf", 2, "WPA3", False)],
+        )
+        self.assertIn(("scan",), self.fake.calls)
+
+    def join(self, *args):
+        self.assertTrue(wifi._lock.acquire(blocking=False))
+        wifi._wpa_connect(*args)
+        self.assertTrue(wifi._lock.acquire(blocking=False))
+        wifi._lock.release()
+
+    def test_connect(self):
+        self.fake.networks["5"] = {"ssid": "Voisin", "psk": "ancien", "enabled": True}
+        self.join("Voisin", "voisin1234", False, "WPA2")
+        self.assertEqual(wifi.job()["state"], "connected")
+        self.assertTrue(wifi.job()["saved"])
+        new = self.fake.networks[self.fake.current]
+        self.assertEqual(new["ssid"], "Voisin")
+        self.assertEqual(new["key_mgmt"], "WPA-PSK")
+        self.assertEqual(new["priority"], "10")
+        # The password itself never goes to wpa_supplicant, only the key.
+        self.assertFalse(any("voisin1234" in " ".join(c) for c in self.fake.calls))
+        # Old entry of the same network forgotten, others kept as fallbacks.
+        self.assertNotIn("5", self.fake.networks)
+        self.assertTrue(self.fake.networks["0"]["enabled"])
+        self.assertTrue(self.fake.saved)
+
+    def test_wrong_password_goes_back(self):
+        self.join("Voisin", "mauvais-mdp", False, "WPA2")
+        self.assertEqual((wifi.job()["state"], wifi.job()["reason"]), ("failed", "wrong-password"))
+        self.assertEqual(self.fake.current, "0")
+        self.assertEqual(set(self.fake.networks), {"0"})
+        self.assertTrue(self.fake.networks["0"]["enabled"])
+        self.assertFalse(self.fake.saved)
+
+    def test_network_not_found(self):
+        self.join("Absent", "absent1234", False, "WPA2")
+        self.assertEqual(wifi.job()["reason"], "not-found")
+        self.assertEqual(self.fake.current, "0")
+
+    def test_hidden_and_wpa3(self):
+        self.fake.passwords["Cache"] = '"cache1234"'
+        added = []
+        real = self.fake.__call__
+
+        def spy(*args, **kwargs):
+            if args[0] == "set_network":
+                added.append(args[2:])
+            return real(*args, **kwargs)
+
+        with mock.patch.object(wifi, "_wpa", spy):
+            self.join("Cache", "cache1234", True, "WPA3")
+        self.assertIn(("scan_ssid", "1"), added)
+        self.assertIn(("key_mgmt", "SAE"), added)
+        self.assertIn(("sae_password", '"cache1234"'), added)

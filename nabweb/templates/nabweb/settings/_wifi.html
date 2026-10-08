@@ -208,8 +208,8 @@
   data-text-connected="{% trans 'Connecté' %}"
   data-text-hotspot="{% trans 'Réseau de configuration du lapin' %}"
   data-text-disconnected="{% trans 'Non connecté' %}"
-  data-text-unmanaged="{% trans 'Wi-Fi non géré par NetworkManager' %}"
-  data-text-unmanaged-help="{% trans 'Le changement de réseau n’est pas possible depuis cette page.' %}"
+  data-text-unmanaged="{% trans 'Gestion du Wi-Fi indisponible' %}"
+  data-text-unmanaged-help="{% trans 'Ni NetworkManager ni wpa_supplicant ne répondent : le changement de réseau n’est pas possible depuis cette page.' %}"
   data-text-testing="{% trans 'Test en cours…' %}"
   data-text-internet-ok="{% trans 'Internet fonctionne (réponse en %s ms).' %}"
   data-text-no-dns="{% trans 'Pas d’Internet : les noms de sites ne sont pas trouvés (box ou DNS).' %}"
@@ -324,7 +324,7 @@
       changeButton.hidden = current.managed === false;
       if (current.managed === false) {
         name.textContent = text('unmanaged');
-        sub.textContent = text('unmanaged-help') + (current.state ? ' (' + current.state + ')' : '');
+        sub.textContent = text('unmanaged-help');
       } else if (!current.connected) {
         name.textContent = text('disconnected');
         sub.textContent = '';

@@ -1,11 +1,16 @@
 """
-Wi-Fi of the rabbit, through NetworkManager (nmcli).
+Wi-Fi of the rabbit.
 
-Comitup already relies on NetworkManager: it shows the red configuration
-hotspot when no known network answers. Using the same tool keeps both in
-agreement. When joining a new network fails, the previous one is brought
-back at once; comitup remains the last resort.
+Two systems are found on rabbits:
+- NetworkManager (nmcli), used with comitup and on recent Raspberry Pi OS;
+- wpa_supplicant (wpa_cli) with dhcpcd, the classic Raspberry Pi OS setup.
+The one actually running is used. When joining a new network fails, the
+previous one is brought back at once.
 """
+
+import binascii
+import hashlib
+import re
 
 import os
 import shutil
@@ -32,7 +37,18 @@ _job = {"state": "idle"}
 
 
 def available():
-    return shutil.which("nmcli") is not None
+    return bool(shutil.which("nmcli") or shutil.which("wpa_cli"))
+
+
+def _backend():
+    """'nm' (NetworkManager), 'wpa' (wpa_supplicant) or None."""
+    if shutil.which("nmcli"):
+        _device, state, _name = _wifi_device()
+        if state not in ("no-networkmanager", "unmanaged"):
+            return "nm"
+    if shutil.which("wpa_cli") and _wpa("ping")[1].strip() == "PONG":
+        return "wpa"
+    return None
 
 
 WIFI_TYPES = ("wifi", "802-11-wireless")
@@ -160,7 +176,12 @@ def _list_networks(rescan):
 
 
 def scan():
-    return _list_networks(rescan=True)
+    backend = _backend()
+    if backend == "nm":
+        return _list_networks(rescan=True)
+    if backend == "wpa":
+        return _wpa_list_networks(rescan=True)
+    return None
 
 
 def _active_connection():
@@ -177,6 +198,24 @@ def _active_connection():
 
 def status():
     """Network in use, its signal and the address of the rabbit."""
+    backend = _backend()
+    if backend == "wpa":
+        return _wpa_status()
+    if backend is None:
+        # Neither NetworkManager nor wpa_supplicant answers.
+        return {
+            "connected": False,
+            "ssid": None,
+            "bars": 0,
+            "address": None,
+            "hotspot": False,
+            "managed": False,
+            "state": "no-wifi-manager",
+        }
+    return _nm_status()
+
+
+def _nm_status():
     result = {
         "connected": False,
         "ssid": None,
@@ -276,8 +315,9 @@ def connect(ssid, password, hidden=False, security=""):
         return False
     _job.clear()
     _job.update({"state": "connecting", "ssid": ssid})
+    target = _wpa_connect if _backend() == "wpa" else _connect
     thread = threading.Thread(
-        target=_connect, args=(ssid, password, hidden, security), daemon=True
+        target=target, args=(ssid, password, hidden, security), daemon=True
     )
     thread.start()
     return True
@@ -361,3 +401,271 @@ def _connect(ssid, password, hidden, security):
         _job.update({"state": "failed", "reason": "failed"})
     finally:
         _lock.release()
+
+
+# --------------------------------------------------------------------------
+# wpa_supplicant (wpa_cli), with dhcpcd giving the address.
+# --------------------------------------------------------------------------
+
+WPA_WAIT = 40  # seconds given to wpa_supplicant to join a network
+
+
+def _wpa_iface():
+    if IFACE:
+        return IFACE
+    try:
+        for name in sorted(os.listdir("/sys/class/net")):
+            if os.path.isdir(os.path.join("/sys/class/net", name, "wireless")):
+                return name
+    except OSError:
+        pass
+    return "wlan0"
+
+
+def _wpa(*args, timeout=10):
+    try:
+        proc = subprocess.run(
+            ["wpa_cli", "-i", _wpa_iface(), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=dict(os.environ, LC_ALL="C"),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except OSError:
+        return 127, ""
+    return proc.returncode, proc.stdout
+
+
+def _wpa_ok(*args):
+    return _wpa(*args)[1].strip() == "OK"
+
+
+def decode_wpa_ssid(text):
+    r"""Undo the escaping of wpa_cli: \\, \" and \xNN."""
+    raw = bytearray()
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text):
+            following = text[index + 1]
+            if following == "x" and index + 3 < len(text):
+                try:
+                    raw.append(int(text[index + 2 : index + 4], 16))
+                    index += 4
+                    continue
+                except ValueError:
+                    pass
+            raw += following.encode("utf8")
+            index += 2
+            continue
+        raw += char.encode("utf8")
+        index += 1
+    return raw.decode("utf8", errors="replace")
+
+
+def _dbm_bars(dbm):
+    if dbm >= -55:
+        return 4
+    if dbm >= -67:
+        return 3
+    if dbm >= -75:
+        return 2
+    return 1
+
+
+def _wpa_state():
+    _code, out = _wpa("status")
+    values = {}
+    for line in out.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return values
+
+
+def _wpa_security(flags):
+    if "EAP" in flags:
+        return "WPA2-Enterprise"
+    if "SAE" in flags and "PSK" not in flags:
+        return "WPA3"
+    if "WPA2" in flags or "RSN" in flags:
+        return "WPA2"
+    if "WPA" in flags:
+        return "WPA1"
+    if "WEP" in flags:
+        return "WEP"
+    return ""
+
+
+def _wpa_list_networks(rescan):
+    if rescan:
+        _wpa("scan")
+        time.sleep(4)  # scanning takes a few seconds
+    code, out = _wpa("scan_results")
+    if code != 0:
+        return None
+    current = decode_wpa_ssid(_wpa_state().get("ssid", ""))
+    best = {}
+    for line in out.splitlines()[1:]:
+        fields = line.split("\t")
+        if len(fields) < 5:
+            continue
+        ssid = decode_wpa_ssid(fields[4])
+        if not ssid or ssid.strip("\x00") == "":
+            continue
+        try:
+            dbm = int(fields[2])
+        except ValueError:
+            dbm = -90
+        security = _wpa_security(fields[3])
+        network = {
+            "ssid": ssid,
+            "signal": max(0, min(100, 2 * (dbm + 100))),
+            "bars": _dbm_bars(dbm),
+            "secure": security != "",
+            "security": security,
+            "current": ssid == current,
+        }
+        known = best.get(ssid)
+        if known is None or network["signal"] > known["signal"]:
+            best[ssid] = network
+    return sorted(
+        best.values(), key=lambda n: (not n["current"], -n["signal"])
+    )
+
+
+def _ip_address(iface):
+    try:
+        proc = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show", "dev", iface],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", proc.stdout)
+    return match.group(1) if match else None
+
+
+def _wpa_status():
+    state = _wpa_state()
+    result = {
+        "connected": False,
+        "ssid": None,
+        "bars": 0,
+        "address": None,
+        "hotspot": False,
+        "managed": True,
+    }
+    if state.get("wpa_state") != "COMPLETED":
+        return result
+    result["connected"] = True
+    result["ssid"] = decode_wpa_ssid(state.get("ssid", ""))
+    result["address"] = state.get("ip_address") or _ip_address(_wpa_iface())
+    _code, out = _wpa("signal_poll")
+    match = re.search(r"RSSI=(-?\d+)", out)
+    result["bars"] = _dbm_bars(int(match.group(1))) if match else 2
+    return result
+
+
+def _wpa_networks():
+    """Saved networks: [(id, ssid, current)]."""
+    _code, out = _wpa("list_networks")
+    saved = []
+    for line in out.splitlines()[1:]:
+        fields = line.split("\t")
+        if len(fields) >= 2 and fields[0].isdigit():
+            flags = fields[3] if len(fields) > 3 else ""
+            saved.append((fields[0], decode_wpa_ssid(fields[1]), "CURRENT" in flags))
+    return saved
+
+
+def _wpa_connect(ssid, password, hidden, security):
+    new_id = None
+    try:
+        previous = next((nid for nid, _s, current in _wpa_networks() if current), None)
+        _code, out = _wpa("add_network")
+        new_id = out.strip().splitlines()[-1] if out.strip() else ""
+        if not new_id.isdigit():
+            new_id = None
+            raise RuntimeError("add_network")
+        ssid_hex = binascii.hexlify(ssid.encode("utf8")).decode("ascii")
+        settings_list = [("ssid", ssid_hex), ("priority", PRIORITY)]
+        if hidden:
+            settings_list.append(("scan_ssid", "1"))
+        if not password:
+            settings_list.append(("key_mgmt", "NONE"))
+        elif _key_mgmt(security) == "sae":
+            settings_list += [
+                ("key_mgmt", "SAE"),
+                ("ieee80211w", "2"),
+                ("sae_password", '"' + password + '"'),
+            ]
+        else:
+            # The key itself, not the password: nothing readable is saved.
+            psk = hashlib.pbkdf2_hmac(
+                "sha1", password.encode("utf8"), ssid.encode("utf8"), 4096, 32
+            ).hex()
+            settings_list += [("key_mgmt", "WPA-PSK"), ("psk", psk)]
+        for key, value in settings_list:
+            if not _wpa_ok("set_network", new_id, key, value):
+                raise RuntimeError(key)
+        _wpa("select_network", new_id)
+
+        seen = set()
+        deadline = time.monotonic() + WPA_WAIT
+        joined = False
+        while time.monotonic() < deadline:
+            time.sleep(1)
+            state = _wpa_state()
+            seen.add(state.get("wpa_state"))
+            if (
+                state.get("wpa_state") == "COMPLETED"
+                and state.get("id") == new_id
+            ):
+                joined = True
+                break
+
+        if joined:
+            # Keep the other saved networks as fallbacks, forget older
+            # entries of the same network, and save for the next start.
+            for nid, saved_ssid, _current in _wpa_networks():
+                if saved_ssid == ssid and nid != new_id:
+                    _wpa("remove_network", nid)
+            _wpa("enable_network", "all")
+            saved = _wpa_ok("save_config")
+            for _second in range(15):  # address given by dhcpcd
+                if _ip_address(_wpa_iface()):
+                    break
+                time.sleep(1)
+            _job.update({"state": "connected", "saved": saved})
+            return
+
+        if "4WAY_HANDSHAKE" in seen:
+            reason = "wrong-password"
+        elif not any(
+            n["ssid"] == ssid for n in (_wpa_list_networks(False) or [])
+        ) and not hidden:
+            reason = "not-found"
+        else:
+            reason = "failed"
+        _wpa_restore(new_id, previous)
+        _job.update({"state": "failed", "reason": reason})
+    except Exception:
+        _wpa_restore(new_id, None)
+        _job.update({"state": "failed", "reason": "failed"})
+    finally:
+        _lock.release()
+
+
+def _wpa_restore(new_id, previous):
+    if new_id is not None:
+        _wpa("remove_network", new_id)
+    if previous is not None:
+        _wpa("select_network", previous)
+    _wpa("enable_network", "all")
