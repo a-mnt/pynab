@@ -219,12 +219,12 @@ class TestWifi(TestCase):
             [(n["ssid"], n["bars"], n["secure"], n["current"]) for n in networks],
             [("Maison", 3, True, True), ("Maison_5G", 4, True, False), ("Box:Invités", 2, False, False), ("Neuf", 1, True, False)],
         )
-        self.assertIn("yes", fake.calls[0])
+        self.assertIn("yes", fake.calls[-1])
 
     def test_status(self):
         fake = FakeNmcli(
             [
-                (("-t", "-f", "NAME,TYPE,DEVICE"), (0, "lo:loopback:lo\nMaison:802-11-wireless:wlan0\n", "")),
+                (("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "eth0:ethernet:unavailable:\nlo:loopback:connected (externally):lo\nwlan0:wifi:connected:preconfigured\n", "")),
                 (("-t", "-g", "802-11-wireless.mode"), (0, "infrastructure\n", "")),
                 (("-t", "-f", "IP4.ADDRESS"), (0, "IP4.ADDRESS[1]:192.168.1.42/24\n", "")),
                 (("-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY"), (0, LIST, "")),
@@ -233,13 +233,13 @@ class TestWifi(TestCase):
         with mock.patch.object(wifi, "_nmcli", fake):
             self.assertEqual(
                 wifi.status(),
-                {"connected": True, "ssid": "Maison", "bars": 3, "address": "192.168.1.42", "hotspot": False},
+                {"connected": True, "ssid": "Maison", "bars": 3, "address": "192.168.1.42", "hotspot": False, "managed": True},
             )
 
     def test_status_hotspot_and_disconnected(self):
         fake = FakeNmcli(
             [
-                (("-t", "-f", "NAME,TYPE,DEVICE"), (0, "comitup-123:802-11-wireless:wlan0\n", "")),
+                (("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "wlan0:802-11-wireless:connected:comitup-123\n", "")),
                 (("-t", "-g", "802-11-wireless.mode"), (0, "ap\n", "")),
                 (("-t", "-f", "IP4.ADDRESS"), (0, "IP4.ADDRESS[1]:10.41.0.1/24\n", "")),
                 (("-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY"), (0, "", "")),
@@ -250,8 +250,25 @@ class TestWifi(TestCase):
             current = wifi.status()
         self.assertTrue(current["hotspot"])
         self.assertEqual(current["address"], "10.41.0.1")
-        with mock.patch.object(wifi, "_nmcli", FakeNmcli([(("-t",), (0, "", ""))])):
-            self.assertFalse(wifi.status()["connected"])
+        disconnected = FakeNmcli([(("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "wlan0:wifi:disconnected:--\n", ""))])
+        with mock.patch.object(wifi, "_nmcli", disconnected):
+            current = wifi.status()
+        self.assertFalse(current["connected"])
+        self.assertTrue(current["managed"])
+
+    def test_status_without_networkmanager(self):
+        not_running = FakeNmcli([(("-t",), (8, "", "Error: NetworkManager is not running."))])
+        with mock.patch.object(wifi, "_nmcli", not_running):
+            current = wifi.status()
+        self.assertEqual((current["managed"], current["state"], current["connected"]), (False, "no-networkmanager", False))
+        unmanaged = FakeNmcli([(("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "wlan0:wifi:unmanaged:--\n", ""))])
+        with mock.patch.object(wifi, "_nmcli", unmanaged):
+            self.assertFalse(wifi.status()["managed"])
+
+    def test_interface_found_by_type(self):
+        fake = FakeNmcli([(("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "p2p-dev-wlan1:wifi-p2p:disconnected:--\nwlan1:wifi:connected:Maison\n", ""))])
+        with mock.patch.object(wifi, "_nmcli", fake):
+            self.assertEqual(wifi._iface(), "wlan1")
 
     def connect(self, answers, *args):
         fake = FakeNmcli(answers)
@@ -262,7 +279,7 @@ class TestWifi(TestCase):
         wifi._lock.release()
         return fake.calls
 
-    ACTIVE = (("-t", "-f", "NAME,TYPE,DEVICE"), (0, "Maison:802-11-wireless:wlan0\n", ""))
+    ACTIVE = (("-t", "-f", "DEVICE,TYPE,STATE,CONNECTION"), (0, "wlan0:wifi:connected:Maison\n", ""))
     PROFILES = (("-t", "-f", "NAME"), (0, "Maison\nlo\n", ""))
 
     def test_connect_new_network(self):

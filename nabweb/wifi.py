@@ -17,7 +17,8 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-IFACE = getattr(settings, "NABWEB_WIFI_IFACE", "wlan0")
+# Wi-Fi interface: found automatically (usually wlan0) unless set here.
+IFACE = getattr(settings, "NABWEB_WIFI_IFACE", None)
 INTERNET_TEST_URL = getattr(
     settings,
     "NABWEB_INTERNET_TEST_URL",
@@ -32,6 +33,35 @@ _job = {"state": "idle"}
 
 def available():
     return shutil.which("nmcli") is not None
+
+
+WIFI_TYPES = ("wifi", "802-11-wireless")
+
+
+def _wifi_device():
+    """
+    (interface, state, connection) of the Wi-Fi interface, as NetworkManager
+    reports it, e.g. ("wlan0", "connected", "preconfigured").
+    """
+    code, out, _err = _nmcli(
+        "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"
+    )
+    if code != 0:
+        # Typically "NetworkManager is not running".
+        return IFACE or "wlan0", "no-networkmanager", ""
+    if code == 0:
+        for line in out.splitlines():
+            fields = split_terse(line)
+            if len(fields) < 4 or fields[1] not in WIFI_TYPES:
+                continue
+            if IFACE and fields[0] != IFACE:
+                continue
+            return fields[0], fields[2], fields[3]
+    return IFACE or "wlan0", "unavailable", ""
+
+
+def _iface():
+    return _wifi_device()[0]
 
 
 def _nmcli(*args, timeout=20):
@@ -90,7 +120,7 @@ def _list_networks(rescan):
         "wifi",
         "list",
         "ifname",
-        IFACE,
+        _iface(),
         "--rescan",
         "yes" if rescan else "no",
         timeout=30,
@@ -134,21 +164,15 @@ def scan():
 
 
 def _active_connection():
-    """Name and mode of the Wi-Fi connection in use, or (None, None)."""
-    code, out, _err = _nmcli(
-        "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"
-    )
-    if code != 0:
+    """Name and mode ("infrastructure", "ap") of the Wi-Fi connection in use."""
+    _device, state, name = _wifi_device()
+    # "connected", "connected (externally)", "connected (site only)"...
+    if not state.startswith("connected") or not name or name == "--":
         return None, None
-    for line in out.splitlines():
-        fields = split_terse(line)
-        if len(fields) >= 3 and fields[2] == IFACE and "wireless" in fields[1]:
-            name = fields[0]
-            _code, mode, _err = _nmcli(
-                "-t", "-g", "802-11-wireless.mode", "connection", "show", name
-            )
-            return name, mode.strip()
-    return None, None
+    _code, mode, _err = _nmcli(
+        "-t", "-g", "802-11-wireless.mode", "connection", "show", name
+    )
+    return name, mode.strip()
 
 
 def status():
@@ -159,13 +183,20 @@ def status():
         "bars": 0,
         "address": None,
         "hotspot": False,
+        "managed": True,
     }
+    _device, state, _name = _wifi_device()
+    if state in ("no-networkmanager", "unmanaged", "unavailable"):
+        # Wi-Fi not handled by NetworkManager: this page cannot change it.
+        result["managed"] = False
+        result["state"] = state
+        return result
     name, mode = _active_connection()
     if name is None:
         return result
     result["hotspot"] = mode == "ap"
     code, out, _err = _nmcli(
-        "-t", "-f", "IP4.ADDRESS", "device", "show", IFACE
+        "-t", "-f", "IP4.ADDRESS", "device", "show", _iface()
     )
     if code == 0:
         for line in out.splitlines():
@@ -254,6 +285,7 @@ def connect(ssid, password, hidden=False, security=""):
 
 def _connect(ssid, password, hidden, security):
     try:
+        iface = _iface()
         previous, _mode = _active_connection()
         name = ssid
         existed = _profile_exists(name)
@@ -290,7 +322,7 @@ def _connect(ssid, password, hidden, security):
             )
         else:
             code, _out, err = _nmcli(
-                "connection", "add", "type", "wifi", "ifname", IFACE,
+                "connection", "add", "type", "wifi", "ifname", iface,
                 "con-name", name, "ssid", ssid, *settings_args
             )
         if code == 0:
@@ -302,7 +334,7 @@ def _connect(ssid, password, hidden, security):
                 "id",
                 name,
                 "ifname",
-                IFACE,
+                iface,
                 timeout=CONNECT_WAIT + 15,
             )
         if code == 0:

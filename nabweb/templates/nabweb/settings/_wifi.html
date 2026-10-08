@@ -52,7 +52,7 @@
 
   .nab-wifi-buttons {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 10px;
     margin-top: 14px;
   }
@@ -208,6 +208,8 @@
   data-text-connected="{% trans 'Connecté' %}"
   data-text-hotspot="{% trans 'Réseau de configuration du lapin' %}"
   data-text-disconnected="{% trans 'Non connecté' %}"
+  data-text-unmanaged="{% trans 'Wi-Fi non géré par NetworkManager' %}"
+  data-text-unmanaged-help="{% trans 'Le changement de réseau n’est pas possible depuis cette page.' %}"
   data-text-testing="{% trans 'Test en cours…' %}"
   data-text-internet-ok="{% trans 'Internet fonctionne (réponse en %s ms).' %}"
   data-text-no-dns="{% trans 'Pas d’Internet : les noms de sites ne sont pas trouvés (box ou DNS).' %}"
@@ -319,7 +321,11 @@
       var name = card.querySelector('.js-wifi-name');
       var sub = card.querySelector('.js-wifi-sub');
       card.querySelector('.js-wifi-bars').dataset.bars = current.connected ? (current.bars || 0) : 0;
-      if (!current.connected) {
+      changeButton.hidden = current.managed === false;
+      if (current.managed === false) {
+        name.textContent = text('unmanaged');
+        sub.textContent = text('unmanaged-help') + (current.state ? ' (' + current.state + ')' : '');
+      } else if (!current.connected) {
         name.textContent = text('disconnected');
         sub.textContent = '';
       } else if (current.hotspot) {
