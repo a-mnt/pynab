@@ -127,6 +127,9 @@
       </div>
 
       <div class="col-12 col-xl-6 mb-4">
+        {% include "nabweb/_quick_actions.html" %}
+      </div>
+      <div class="col-12 mb-4">
         <div class="nab-card h-100">
           <div class="nab-section-head">
             <h2 class="nab-section-title">{% trans "Logs" %}</h2>
@@ -134,6 +137,72 @@
               {% trans "Journaux utiles pour le diagnostic et la maintenance." %}
             </p>
           </div>
+
+          <div class="nab-monitor mb-4" id="nab-monitor">
+            <div class="nab-monitor-head">
+              <div>
+                <div class="custom-control custom-switch">
+                  <input type="checkbox" class="custom-control-input" id="monitor-switch" disabled>
+                  <label class="custom-control-label nab-monitor-title" for="monitor-switch">
+                    {% trans "Mode analyse" %}
+                  </label>
+                </div>
+                <p class="nab-monitor-help mb-0">
+                  {% trans "Relève toutes les 10 minutes la mémoire, les fichiers ouverts et les threads de chaque service, pour repérer ce qui s’accumule avant un blocage. Les mesures sont conservées après un redémarrage." %}
+                </p>
+              </div>
+              <div class="nab-monitor-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary js-monitor-refresh">{% trans "Actualiser" %}</button>
+                <a class="btn btn-sm btn-outline-secondary js-monitor-download" href="{% url 'nabweb.monitor' %}?format=csv">{% trans "CSV" %}</a>
+                <button type="button" class="btn btn-sm btn-outline-danger js-monitor-clear">{% trans "Effacer" %}</button>
+              </div>
+            </div>
+
+            <div class="nab-monitor-body" hidden>
+              <div class="nab-monitor-meta js-monitor-meta"></div>
+
+              <div class="nab-monitor-boot js-monitor-boot-wrap" hidden>
+                <label for="monitor-boot-select">{% trans "Période :" %}</label>
+                <select id="monitor-boot-select" class="form-control form-control-sm"></select>
+              </div>
+
+              <div class="nab-monitor-alerts js-monitor-alerts"></div>
+
+              <div class="nab-monitor-kpis js-monitor-kpis"></div>
+
+              <div class="nab-monitor-chart">
+                <div class="nab-monitor-legend">
+                  <span><i class="nab-dot nab-dot-mem"></i>{% trans "Mémoire disponible (Mo)" %}</span>
+                  <span><i class="nab-dot nab-dot-swap"></i>{% trans "Swap utilisé (Mo)" %}</span>
+                </div>
+                <div class="nab-monitor-plot js-monitor-plot">
+                  <svg class="js-monitor-chart" viewBox="0 0 720 200" preserveAspectRatio="none" role="img" aria-label="{% trans 'Évolution de la mémoire' %}"></svg>
+                </div>
+                <div class="nab-monitor-axis js-monitor-axis"></div>
+              </div>
+
+              <div class="table-responsive">
+                <table class="table table-sm nab-monitor-table">
+                  <thead>
+                    <tr>
+                      <th>{% trans "Processus" %}</th>
+                      <th class="text-right">{% trans "Mémoire (Mo)" %}</th>
+                      <th class="text-right">{% trans "Évolution / jour" %}</th>
+                      <th class="text-right">{% trans "Fichiers ouverts" %}</th>
+                      <th class="text-right">{% trans "Threads" %}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="js-monitor-table"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <p class="nab-monitor-empty text-muted mb-0 js-monitor-empty" hidden>
+              {% trans "Aucune mesure pour l’instant. Activez le mode analyse : une première mesure est prise immédiatement." %}
+            </p>
+          </div>
+
+          <h3 class="nab-monitor-subtitle">{% trans "Fichiers de log" %}</h3>
 
           {% if available_logs %}
             <div class="nab-log-viewer">
@@ -168,9 +237,6 @@
         </div>
       </div>
 
-      <div class="col-12 col-xl-6 mb-4">
-        {% include "nabweb/_quick_actions.html" %}
-      </div>
     </div>
   </section>
 
@@ -210,6 +276,231 @@
           }
         });
       });
+    });
+  </script>
+
+  <style>
+    .nab-monitor { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; }
+    .nab-monitor-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+    .nab-monitor-title { font-weight: 700; color: #111827; }
+    .nab-monitor-help { color: #6b7280; font-size: 0.88rem; max-width: 640px; margin-top: 4px; }
+    .nab-monitor-actions { display: flex; gap: 6px; align-items: flex-start; }
+    .nab-monitor-actions .btn { min-height: 34px; padding: 6px 12px; border-radius: 10px; line-height: 1.4; }
+    .nab-monitor-body { margin-top: 16px; }
+    .nab-monitor-meta { color: #374151; font-size: 0.9rem; margin-bottom: 10px; }
+    .nab-monitor-boot { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .nab-monitor-boot select { max-width: 360px; }
+    .nab-monitor-boot label { white-space: nowrap; margin: 0; }
+    .nab-monitor-alerts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .nab-monitor-alert { background: #fef3c7; color: #92400e; border-radius: 999px; padding: 2px 10px; font-size: 0.82rem; font-weight: 600; }
+    .nab-monitor-alert.ok { background: #dcfce7; color: #166534; }
+    .nab-monitor-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .nab-monitor-kpi { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 8px 10px; }
+    .nab-monitor-kpi span { display: block; color: #6b7280; font-size: 0.75rem; }
+    .nab-monitor-kpi strong { font-size: 1.05rem; color: #111827; }
+    .nab-monitor-chart { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; margin-bottom: 14px; }
+    .nab-monitor-plot { position: relative; }
+    .nab-monitor-chart svg { width: 100%; height: 200px; display: block; }
+    .nab-monitor-ylabel { position: absolute; left: 4px; font-size: 0.7rem; color: #9ca3af; transform: translateY(-100%); pointer-events: none; }
+    .nab-monitor-legend { display: flex; gap: 16px; font-size: 0.8rem; color: #374151; margin-bottom: 4px; }
+    .nab-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+    .nab-dot-mem { background: #3341b5; }
+    .nab-dot-swap { background: #d97706; }
+    .nab-monitor-axis { display: flex; justify-content: space-between; font-size: 0.75rem; color: #6b7280; }
+    .nab-monitor-table { background: #fff; font-size: 0.88rem; margin-bottom: 0; }
+    .nab-monitor-table tr.suspect td { background: #fff7ed; }
+    .nab-monitor-table tr.suspect td:first-child { font-weight: 700; color: #9a3412; }
+    .nab-monitor-up { color: #b45309; font-weight: 700; }
+    .nab-monitor-subtitle { font-size: 1.05rem; font-weight: 700; color: #111827; margin-bottom: 10px; }
+  </style>
+
+  <script type="text/javascript">
+    $(function() {
+      var url = "{% url 'nabweb.monitor' %}";
+      var csrf = "{{ csrf_token }}";
+      var $root = $("#nab-monitor");
+      var $switch = $("#monitor-switch");
+      var $boot = $("#monitor-boot-select");
+      var selectedBoot = null;
+
+      var ALERTS = {
+        under_voltage: "{% trans 'Sous-tension détectée (alimentation insuffisante)' %}",
+        freq_capped: "{% trans 'Fréquence CPU bridée' %}",
+        throttled: "{% trans 'CPU ralenti (throttling)' %}",
+        soft_temp_limit: "{% trans 'Limite de température atteinte' %}",
+        low_memory: "{% trans 'Mémoire disponible faible' %}",
+        swap: "{% trans 'Swap fortement utilisé' %}",
+        disk_full: "{% trans 'Carte SD presque pleine' %}",
+        tmp_full: "{% trans '/tmp volumineux' %}",
+        wifi_down: "{% trans 'Wi-Fi tombé au moins une fois' %}"
+      };
+
+      function fmtDate(iso) {
+        var d = new Date(iso);
+        return d.toLocaleDateString(undefined, { day: "2-digit", month: "2-digit" }) +
+          " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function fmtUptime(s) {
+        var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+        return (d ? d + " j " : "") + h + " h";
+      }
+
+      function num(v, digits) {
+        if (v === null || v === undefined) { return "–"; }
+        return Number(v).toFixed(digits === undefined ? 0 : digits);
+      }
+
+      function evolution(start, end) {
+        var cls = end > start ? " class='nab-monitor-up'" : "";
+        return start === end ? String(end) : start + " → <span" + cls + ">" + end + "</span>";
+      }
+
+      function drawChart(points) {
+        var svg = $root.find(".js-monitor-chart")[0];
+        var W = 720, H = 200, P = 6;
+        while (svg.firstChild) { svg.removeChild(svg.firstChild); }
+        $root.find(".nab-monitor-ylabel").remove();
+        if (points.length < 1) { return; }
+        var t0 = new Date(points[0].t).getTime();
+        var t1 = new Date(points[points.length - 1].t).getTime();
+        var span = Math.max(t1 - t0, 1);
+        var max = 1;
+        points.forEach(function(p) { max = Math.max(max, p.mem, p.swap); });
+        max = Math.ceil(max / 50) * 50;
+        function x(p) { return points.length === 1 ? W / 2 : P + (new Date(p.t).getTime() - t0) / span * (W - 2 * P); }
+        function y(v) { return H - P - v / max * (H - 2 * P); }
+        var ns = "http://www.w3.org/2000/svg";
+        [0.25, 0.5, 0.75].forEach(function(f) {
+          var g = document.createElementNS(ns, "line");
+          g.setAttribute("x1", 0); g.setAttribute("x2", W);
+          g.setAttribute("y1", y(max * f)); g.setAttribute("y2", y(max * f));
+          g.setAttribute("stroke", "#e5e7eb"); g.setAttribute("stroke-width", "1");
+          g.setAttribute("vector-effect", "non-scaling-stroke");
+          svg.appendChild(g);
+          // libellé en HTML : le SVG est étiré, son texte serait déformé
+          $("<span class='nab-monitor-ylabel'></span>")
+            .css("top", (y(max * f) / H * 100) + "%")
+            .text(Math.round(max * f))
+            .appendTo($root.find(".js-monitor-plot"));
+        });
+        [["mem", "#3341b5"], ["swap", "#d97706"]].forEach(function(serie) {
+          var path = document.createElementNS(ns, "polyline");
+          path.setAttribute("points", points.map(function(p) { return x(p) + "," + y(p[serie[0]]); }).join(" "));
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", serie[1]);
+          path.setAttribute("stroke-width", "2");
+          path.setAttribute("vector-effect", "non-scaling-stroke");
+          svg.appendChild(path);
+        });
+        var axis = $root.find(".js-monitor-axis").empty();
+        axis.append($("<span></span>").text(fmtDate(points[0].t)));
+        axis.append($("<span></span>").text(fmtDate(points[points.length - 1].t)));
+      }
+
+      function render(data) {
+        $switch.prop("disabled", false).prop("checked", data.enabled);
+        var boot = data.boot;
+        $root.find(".js-monitor-empty").prop("hidden", !!boot);
+        $root.find(".nab-monitor-body").prop("hidden", !boot);
+        $root.find(".js-monitor-download, .js-monitor-clear").toggle(data.count > 0);
+        if (!boot) { return; }
+
+        var meta = data.count + " {% trans 'mesures' %} · " +
+          (data.enabled ? "{% trans 'actif' %}" : "{% trans 'en pause' %}") +
+          " · {% trans 'journal système persistant :' %} " +
+          (data.journal_persistent ? "{% trans 'oui' %}" : "{% trans 'non' %}");
+        $root.find(".js-monitor-meta").text(meta);
+
+        var $wrap = $root.find(".js-monitor-boot-wrap");
+        $wrap.prop("hidden", data.boots.length < 2);
+        $boot.empty();
+        data.boots.forEach(function(b, i) {
+          var label = fmtDate(b.start) + " → " + fmtDate(b.end) + " (" + b.count + ")";
+          if (i < data.boots.length - 1) { label += " · {% trans 'terminé par un redémarrage' %}"; }
+          else { label += " · {% trans 'en cours' %}"; }
+          $boot.append($("<option></option>").val(i).text(label));
+        });
+        $boot.val(boot.index);
+
+        var $alerts = $root.find(".js-monitor-alerts").empty();
+        if (boot.ended_by_reboot) {
+          $alerts.append($("<span class='nab-monitor-alert'></span>").text(
+            "{% trans 'Dernière mesure avant redémarrage :' %} " + fmtDate(boot.last.date)));
+        }
+        if (boot.alerts.length === 0) {
+          $alerts.append($("<span class='nab-monitor-alert ok'></span>").text("{% trans 'Aucune alerte' %}"));
+        }
+        boot.alerts.forEach(function(a) {
+          $alerts.append($("<span class='nab-monitor-alert'></span>").text(ALERTS[a] || a));
+        });
+
+        var l = boot.last;
+        var kpis = [
+          ["{% trans 'Uptime' %}", fmtUptime(l.uptime)],
+          ["{% trans 'Mémoire dispo' %}", num(l.mem) + " Mo"],
+          ["{% trans 'Swap utilisé' %}", num(l.swap) + " Mo"],
+          ["{% trans 'Charge' %}", num(l.load, 2)],
+          ["{% trans 'Température' %}", l.temp === null ? "–" : num(l.temp, 1) + " °C"],
+          ["{% trans 'Carte SD' %}", l.root_pct + " %"],
+          ["/tmp", num(l.tmp, 1) + " Mo"],
+          ["{% trans 'Processus' %}", l.nb_proc_start === l.nb_proc ? l.nb_proc : l.nb_proc_start + " → " + l.nb_proc]
+        ];
+        var $kpis = $root.find(".js-monitor-kpis").empty();
+        kpis.forEach(function(k) {
+          var $k = $("<div class='nab-monitor-kpi'><span></span><strong></strong></div>");
+          $k.find("span").text(k[0]);
+          $k.find("strong").text(k[1]);
+          $kpis.append($k);
+        });
+
+        drawChart(boot.points);
+
+        var $tbody = $root.find(".js-monitor-table").empty();
+        boot.processes.forEach(function(p) {
+          var name = p.name + (p.count > 1 ? " ×" + p.count : "");
+          var perDay = p.rss_per_day === null ? "–" : (p.rss_per_day > 0 ? "+" : "") + num(p.rss_per_day, 1) + " Mo";
+          var $tr = $("<tr></tr>").toggleClass("suspect", p.suspect);
+          $tr.append($("<td></td>").text(name));
+          $tr.append($("<td class='text-right'></td>").html(evolution(num(p.rss_start, 1), num(p.rss_end, 1))));
+          $tr.append($("<td class='text-right'></td>").text(perDay));
+          $tr.append($("<td class='text-right'></td>").html(evolution(p.fds_start, p.fds_end)));
+          $tr.append($("<td class='text-right'></td>").html(evolution(p.threads_start, p.threads_end)));
+          $tbody.append($tr);
+        });
+      }
+
+      function load() {
+        var params = selectedBoot === null ? {} : { boot: selectedBoot };
+        $.getJSON(url, params).done(function(r) {
+          if (r.status === "ok") { render(r.monitor); }
+        });
+      }
+
+      function post(action) {
+        $switch.prop("disabled", true);
+        return $.ajax({
+          url: url, method: "POST",
+          headers: { "X-CSRFToken": csrf },
+          data: { action: action }
+        }).done(function(r) {
+          selectedBoot = null;
+          render(r.monitor);
+        }).fail(function(xhr) {
+          var msg = (xhr.responseJSON && xhr.responseJSON.message) || "{% trans 'Erreur' %}";
+          $.bootstrapGrowl(msg, { type: "danger" });
+          load();
+        });
+      }
+
+      $switch.on("change", function() { post(this.checked ? "enable" : "disable"); });
+      $boot.on("change", function() { selectedBoot = $(this).val(); load(); });
+      $root.find(".js-monitor-refresh").on("click", function() { selectedBoot = null; load(); });
+      $root.find(".js-monitor-clear").on("click", function() {
+        if (window.confirm("{% trans 'Effacer toutes les mesures du mode analyse ?' %}")) { post("clear"); }
+      });
+
+      load();
     });
   </script>
 {% endblock %}

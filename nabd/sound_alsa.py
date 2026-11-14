@@ -109,6 +109,7 @@ class SoundAlsa(Sound):  # pragma: no cover
         return self.sound_card
 
     def _play(self, filename):
+        device = None
         try:
             device = alsaaudio.PCM(device=self.playback_device)
             if (
@@ -124,7 +125,8 @@ class SoundAlsa(Sound):  # pragma: no cover
             logging.error(f"{filename}: {err}")
         finally:
             self.currently_playing = False
-            device.close()
+            if device is not None:
+                device.close()
 
     def _play_wav_file(self, device, filename):
         with wave.open(filename, "rb") as f:
@@ -196,8 +198,12 @@ class SoundAlsa(Sound):  # pragma: no cover
         # url begins with http:// or https:// (see above)
         # Timeout so that a stalled stream ends (and can be canceled)
         # instead of blocking the sound thread forever.
-        response = urlopen(url, timeout=10)  # nosec B310
+        # Closed explicitly: a radio left playing for hours must not keep
+        # sockets (and their buffers) waiting for the garbage collector.
+        with urlopen(url, timeout=10) as response:  # nosec B310
+            self._stream_mp3_response(device, mp3, response)
 
+    def _stream_mp3_response(self, device, mp3, response):
         mp3chunk = response.read(4096)
         if not mp3chunk:
             return

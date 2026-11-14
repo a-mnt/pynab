@@ -1009,6 +1009,10 @@ class Nabd:
         except Exception:
             logging.debug(traceback.format_exc())
         finally:
+            # Also close the socket when the service vanished abruptly
+            # (reset, broken pipe...): otherwise its descriptor leaks.
+            if not writer.is_closing():
+                writer.close()
             del self.service_writers[writer]
             if self.interactive_service_writer == writer:
                 await self.exit_interactive()

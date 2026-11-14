@@ -11,6 +11,7 @@ from .views import (
     NabWebEarsView,
     NabWebHardwareTestView,
     NabWebLogViewerView,
+    NabWebMonitorView,
     NabWebRfidReadView,
     NabWebRfidView,
     NabWebRfidWriteView,
@@ -63,6 +64,11 @@ urlpatterns: List[Union[URLResolver, URLPattern]] = [
         "system-info/logs",
         NabWebLogViewerView.as_view(),
         name="nabweb.logs",
+    ),
+    path(
+        "system-info/monitor",
+        NabWebMonitorView.as_view(),
+        name="nabweb.monitor",
     ),
     path(
         "system-info/shutdown/<str:mode>",

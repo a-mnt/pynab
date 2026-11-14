@@ -16,7 +16,7 @@ from asgiref.sync import async_to_sync, sync_to_async
 from django.apps import apps
 from django.conf import settings
 from django.core.cache import cache
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import Resolver404, resolve
 from django.utils import translation
@@ -29,7 +29,7 @@ from nabcommon import hardware
 from nabcommon.nabservice import NabService
 from nabd.i18n import Config
 
-from . import sound, wifi
+from . import monitoring, sound, wifi
 
 
 def _run_command(cmd, cwd=None):
@@ -661,6 +661,59 @@ class NabWebLogViewerView(View):
                 {"status": "error", "message": str(e)},
                 status=500,
             )
+
+
+class NabWebMonitorView(View):
+    """
+    Mode analyse : activation du relevé périodique (nab-monitor.sh) et
+    lecture des mesures pour la page Système.
+    """
+
+    ACTIONS = ("enable", "disable", "clear", "sample")
+
+    def get(self, request):
+        if request.GET.get("format") == "csv":
+            if not os.path.isfile(monitoring.DATA_FILE):
+                return JsonResponse(
+                    {"status": "error", "message": "No data"}, status=404
+                )
+            return FileResponse(
+                open(monitoring.DATA_FILE, "rb"),
+                as_attachment=True,
+                filename="nab-monitor.csv",
+                content_type="text/csv",
+            )
+        boot = request.GET.get("boot")
+        try:
+            boot_index = int(boot) if boot not in (None, "") else None
+        except ValueError:
+            boot_index = None
+        return JsonResponse(
+            {"status": "ok", "monitor": monitoring.summary(boot_index)}
+        )
+
+    def post(self, request):
+        action = request.POST.get("action")
+        if action not in self.ACTIONS:
+            return JsonResponse(
+                {"status": "error", "message": "Invalid action"}, status=400
+            )
+        try:
+            if action == "enable":
+                monitoring.enable()
+            elif action == "disable":
+                monitoring.disable()
+            elif action == "clear":
+                monitoring.clear()
+            else:
+                monitoring.take_sample()
+        except (OSError, RuntimeError) as err:
+            return JsonResponse(
+                {"status": "error", "message": str(err)}, status=500
+            )
+        return JsonResponse(
+            {"status": "ok", "monitor": monitoring.summary()}
+        )
 
 
 class NabWebHardwareTestView(View):
