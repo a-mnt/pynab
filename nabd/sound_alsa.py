@@ -1,4 +1,5 @@
 import asyncio
+import ctypes
 import functools
 import io
 import logging
@@ -12,6 +13,36 @@ from mpg123 import Mpg123  # type: ignore
 
 from .cancel import wait_with_cancel_event
 from .sound import Sound
+
+
+class _Mpg123(Mpg123):
+    """
+    Mpg123 that really frees its decoder.
+
+    mpg123-python's __del__ only calls mpg123_close() (end of the current
+    stream) and never mpg123_delete(): the handle allocated by mpg123_new()
+    leaked for every sound played, slowly filling the memory of nabd until
+    the rabbit froze after a few days.
+    """
+
+    def release(self):
+        handle = getattr(self, "handle", None)
+        if not handle:
+            return
+        self.handle = None
+        if isinstance(handle, int):
+            # no argtypes declared by the wrapper: keep the full pointer
+            handle = ctypes.c_void_p(handle)
+        try:
+            self._lib.mpg123_close(handle)
+        finally:
+            self._lib.mpg123_delete(handle)
+
+    def __del__(self):
+        try:
+            self.release()
+        except Exception:  # never raise from a destructor
+            pass
 
 
 class SoundAlsa(Sound):  # pragma: no cover
@@ -160,7 +191,13 @@ class SoundAlsa(Sound):  # pragma: no cover
                 data = f.readframes(periodsize)
 
     def _play_mp3_file(self, device, filename):
-        mp3 = Mpg123(filename)
+        mp3 = _Mpg123(filename)
+        try:
+            self._play_mp3_frames(device, mp3)
+        finally:
+            mp3.release()
+
+    def _play_mp3_frames(self, device, mp3):
         rate, channels, encoding = mp3.get_format()
         width = mp3.get_width_by_encoding(encoding)
         self._setup_device(device, channels, rate, width)
@@ -194,14 +231,17 @@ class SoundAlsa(Sound):  # pragma: no cover
             device.write(chunk.getvalue())
 
     def _stream_mp3(self, device, url):
-        mp3 = Mpg123()
+        mp3 = _Mpg123()
         # url begins with http:// or https:// (see above)
         # Timeout so that a stalled stream ends (and can be canceled)
         # instead of blocking the sound thread forever.
         # Closed explicitly: a radio left playing for hours must not keep
         # sockets (and their buffers) waiting for the garbage collector.
-        with urlopen(url, timeout=10) as response:  # nosec B310
-            self._stream_mp3_response(device, mp3, response)
+        try:
+            with urlopen(url, timeout=10) as response:  # nosec B310
+                self._stream_mp3_response(device, mp3, response)
+        finally:
+            mp3.release()
 
     def _stream_mp3_response(self, device, mp3, response):
         mp3chunk = response.read(4096)
