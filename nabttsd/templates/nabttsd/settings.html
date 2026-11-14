@@ -1,0 +1,130 @@
+{% load i18n %}
+<div class="card" id="nabttsd-settings">
+  <style>
+    #nabttsd-settings .nab-sw-row { display: flex; align-items: center; gap: 12px; min-height: 52px; }
+    #nabttsd-settings .nab-sw-text { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+    #nabttsd-settings .nab-sw-sub { color: #6b7280; font-size: 0.88rem; }
+    #nabttsd-settings .nab-switch { position: relative; flex: 0 0 auto; width: 52px; height: 32px; padding: 0; border: 0; border-radius: 16px; background: #d1d5db; cursor: pointer; transition: background 0.15s; }
+    #nabttsd-settings .nab-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+    #nabttsd-settings .nab-switch[aria-checked="true"] { background: #3341b5; }
+    #nabttsd-settings .nab-switch[aria-checked="true"]::after { transform: translateX(20px); }
+    #nabttsd-settings .nab-tts-say { display: flex; gap: 8px; margin: 4px 0 16px; }
+    #nabttsd-settings .nab-tts-say textarea { flex: 1 1 auto; min-height: 44px; resize: vertical; }
+    #nabttsd-settings .nab-tts-say button { flex: 0 0 auto; min-height: 44px; }
+    #nabttsd-settings .nab-tts-field { margin-top: 12px; }
+    #nabttsd-settings .nab-tts-field label { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    #nabttsd-settings input[type="range"] { width: 100%; }
+    #nabttsd-settings .nab-status { min-height: 1.4em; margin: 8px 0 0; color: #6b7280; font-size: 0.88rem; }
+    #nabttsd-settings .nab-status.is-warning { color: #b45309; }
+    #nabttsd-settings .nab-tts-missing { padding: 12px; border-radius: 12px; background: #fff7ed; color: #9a3412; }
+  </style>
+
+  <div class="card-body">
+  {% if not engines %}
+    <div class="nab-tts-missing">
+      {% trans "Aucun moteur de synthèse vocale n’est installé sur le lapin." %}<br>
+      <code>sudo apt-get install libttspico-utils</code>
+      {% trans "ou" %} <code>sudo apt-get install espeak-ng</code>
+    </div>
+  {% else %}
+    <label for="nabttsd-text" class="nab-sw-sub">{% trans "Faire parler le lapin" %}</label>
+    <div class="nab-tts-say">
+      <textarea id="nabttsd-text" class="form-control js-text" maxlength="1000" rows="1" placeholder="{% trans 'Bonjour, je suis un lapin !' %}"></textarea>
+      <button type="button" class="btn btn-primary js-say">{% trans "Dire" %}</button>
+    </div>
+    <p class="nab-status js-say-status" aria-live="polite"></p>
+
+    <form action="/nabttsd/settings" autocomplete="off">
+      {% csrf_token %}
+      <div class="nab-sw-row">
+        <div class="nab-sw-text">{% trans "Synthèse vocale activée" %}</div>
+        <button type="button" class="nab-switch js-flag" role="switch" data-name="enabled" aria-checked="{% if config.enabled %}true{% else %}false{% endif %}" aria-label="{% trans 'Synthèse vocale activée' %}"></button>
+        <input type="hidden" name="enabled" value="{% if config.enabled %}true{% else %}false{% endif %}">
+      </div>
+
+      <div class="nab-tts-field">
+        <label for="nabttsd-engine" class="nab-sw-sub">{% trans "Voix" %}</label>
+        <select name="engine" id="nabttsd-engine" class="form-control">
+          {% for id, label in engines %}
+            <option value="{{ id }}" {% if id == current_engine %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="nab-tts-field">
+        <label for="nabttsd-speed" class="nab-sw-sub"><span>{% trans "Débit" %}</span><span class="js-value">{{ config.speed }} %</span></label>
+        <input type="range" id="nabttsd-speed" name="speed" min="50" max="200" step="5" value="{{ config.speed }}">
+      </div>
+      <div class="nab-tts-field">
+        <label for="nabttsd-pitch" class="nab-sw-sub"><span>{% trans "Hauteur" %}</span><span class="js-value">{{ config.pitch }} %</span></label>
+        <input type="range" id="nabttsd-pitch" name="pitch" min="50" max="200" step="5" value="{{ config.pitch }}">
+      </div>
+      <div class="nab-tts-field">
+        <label for="nabttsd-volume" class="nab-sw-sub"><span>{% trans "Volume de la voix" %}</span><span class="js-value">{{ config.volume }} %</span></label>
+        <input type="range" id="nabttsd-volume" name="volume" min="10" max="300" step="10" value="{{ config.volume }}">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block mt-3 js-save" disabled>{% trans "Enregistrer" %}</button>
+      <p class="nab-status js-status" aria-live="polite">{% if saved %}{% trans "Réglages enregistrés." %}{% endif %}</p>
+    </form>
+  {% endif %}
+  </div>
+
+  <script type="text/javascript">
+  $(function() {
+    var card = $("#nabttsd-settings");
+    var form = card.find("form");
+    var save = form.find(".js-save");
+    var token = card.find("input[name='csrfmiddlewaretoken']").val();
+
+    function changed() {
+      save.prop("disabled", false);
+      form.find(".js-status").text("");
+    }
+
+    form.find(".js-flag").on("click", function() {
+      var next = $(this).attr("aria-checked") !== "true";
+      $(this).attr("aria-checked", next ? "true" : "false");
+      form.find("input[name='" + $(this).data("name") + "']").val(next ? "true" : "false");
+      changed();
+    });
+    form.find("select").on("change", changed);
+    form.find("input[type='range']").on("input", function() {
+      $(this).closest(".nab-tts-field").find(".js-value").text(this.value + " %");
+      changed();
+    });
+
+    form.on("submit", function() {
+      save.prop("disabled", true);
+      $.ajax({ url: form.attr("action"), method: "POST", data: form.serialize() })
+        .done(function(data) { card.replaceWith(data); })
+        .fail(function() {
+          save.prop("disabled", false);
+          form.find(".js-status").addClass("is-warning").text("{% trans 'Les réglages n’ont pas été enregistrés.' %}");
+        });
+      return false;
+    });
+
+    card.find(".js-say").on("click", function() {
+      var button = $(this);
+      var status = card.find(".js-say-status");
+      var text = $.trim(card.find(".js-text").val()) || card.find(".js-text").attr("placeholder");
+      button.prop("disabled", true);
+      status.removeClass("is-warning").text("{% trans 'Synthèse en cours…' %}");
+      $.ajax({
+        url: "/nabttsd/say",
+        method: "POST",
+        data: { text: text, csrfmiddlewaretoken: token },
+        dataType: "json",
+        timeout: 160000
+      })
+        .done(function() { status.text("{% trans 'Le lapin parle.' %}"); })
+        .fail(function(xhr) {
+          var message = xhr.responseJSON && xhr.responseJSON.message;
+          status.addClass("is-warning").text("{% trans 'Échec :' %} " + (message || "{% trans 'pas de réponse' %}"));
+        })
+        .always(function() { button.prop("disabled", false); });
+    });
+  });
+  </script>
+</div>

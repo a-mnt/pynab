@@ -100,6 +100,7 @@ SERVICE_LABELS = {
     "nab8balld": (_("Magic 8 Ball"), _("Réponses aléatoires.")),
     "nabsurprised": (_("Surprises"), _("Contenus surprise.")),
     "nabbookd": (_("Livres audio"), _("Histoires interactives.")),
+    "nabttsd": (_("Synthèse vocale"), _("Faire parler le lapin.")),
 }
 
 
